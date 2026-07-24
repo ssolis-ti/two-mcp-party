@@ -1,98 +1,56 @@
-# 🌉 AgentBridge
+# AgentBridge Hub 🚀
 
-> *Conecta, potencia y sincroniza tus agentes AI.*
+AgentBridge es un servidor central (Hub) diseñado para permitir la colaboración en tiempo real entre múltiples Agentes de IA en una red local (LAN). Utiliza el protocolo **Model Context Protocol (MCP)** sobre **Server-Sent Events (SSE)**.
+
+## 🏗️ Arquitectura: Host vs Agentes
+
+Para entender AgentBridge, imagina una sala de reuniones virtual:
+
+*   **El Host / Servidor (Este código):** Es el "Cerebro Central". Se ejecuta en **una sola PC** de la red. No es un agente inteligente, es una base de datos (SQLite) enrutadora que guarda el estado, la memoria compartida y reparte los mensajes.
+*   **Los Agentes (Clientes):** Son inteligencias artificiales (ej. Claude, Antigravity, Hermes) que se ejecutan en la misma PC del servidor o en **otras PCs de la red Wi-Fi**. Los agentes se conectan al Servidor para "hablar" entre ellos y compartir memoria.
 
 ---
 
-<p align="center">
-    <strong>Un conector universal que permite a 2+ agentes AI de coding (Antigravity, Hermes, Claude Code, OpenCode, OpenClaw, Cursor...) comunicarse, compartir memoria y colaborar en red local. Construido con MCP como protocolo universal.</strong>
-</p>
+## 🛠️ Instalación y Arranque (Para el Host)
+
+El servidor debe instalarse y ejecutarse en la computadora que actuará como Nodo Central.
+
+1. **Clonar e Instalar:**
+   ```bash
+   git clone <tu-repositorio>
+   cd Two
+   npm install
+   ```
+
+2. **Iniciar el Servidor:**
+   ```bash
+   npm start
+   ```
+   *Nota: Si eres desarrollador y necesitas depurar el servidor, puedes iniciarlo con `npm run dev` para habilitar las tools de autodiagnóstico.*
+
+3. **Verificar:**
+   La consola te indicará que el servidor está escuchando. Asegúrate de anotar la IP de esta computadora si vas a conectar agentes desde otras PCs (ej. `http://192.168.1.50:3579/sse`).
 
 ---
 
-## 📋 Estado del Proyecto
+## 🤖 Cómo Conectar un Agente (Para los Clientes)
 
-| Fase | Estado |
-|------|--------|
-| 🏗️ Estructura Base | ✅ Completada |
-| 📜 Constitución | ⏳ Pendiente |
-| 📝 Especificación (PRD) | ⏳ Pendiente |
-| 🔧 Plan Técnico | ⏳ Pendiente |
-| 📋 Desglose de Tareas | ⏳ Pendiente |
-| 🚀 Implementación | ⏳ Pendiente |
+Si eres un Agente de IA y quieres unirte a la red, debes configurar tu cliente MCP para usar transporte SSE apuntando a la URL del Servidor.
 
-## 🤔 ¿Qué es SDD?
+**URL de Conexión:**
+*   Si estás en la misma PC que el Servidor: `http://localhost:3579/sse`
+*   Si estás en otra PC: `http://<IP_DEL_SERVIDOR>:3579/sse`
 
-Spec-Driven Development **invierte la relación tradicional** entre código y especificaciones. En vez de escribir specs que sirven al código, el código sirve a las specs:
+### Flujo de Trabajo del Agente
 
-- **Las especificaciones son la fuente de verdad**, no el código
-- **El código se genera** a partir de especificaciones precisas
-- **Mantener el software** significa evolucionar las especificaciones
-- **Debuggear** significa corregir las specs que generan código incorrecto
+Una vez conectado, el Servidor te expondrá varias *Tools* (herramientas). Sigue siempre este orden:
 
-## 📁 Estructura del Proyecto
+1. **Regístrate:** Usa `bridge_register` para decir quién eres y qué sabes hacer.
+2. **Únete a una Sesión:** Usa `bridge_create_session` o `bridge_join_session`. **NO** puedes enviar mensajes o memoria si no estás dentro de una sesión (sala de trabajo).
+3. **Colabora:**
+   *   Usa `bridge_send_message` para hablar con los demás agentes en tu sesión.
+   *   Usa `bridge_share_memory` para guardar hallazgos persistentes.
+   *   Usa `bridge_get_session_context` para ponerte al día leyendo la memoria y mensajes anteriores.
 
-```
-Two/
-├── .agents/                  # Configuración de agentes AI
-│   └── AGENTS.md            # Reglas y comportamiento del agente
-├── .specify/                 # Configuración de Spec Kit
-│   └── config.yml           # Configuración del proyecto SDD
-├── docs/                     # Documentación completa
-│   ├── 00-INDEX.md          # Índice maestro de documentación
-│   ├── 01-CONSTITUTION.md   # Principios gobernantes del proyecto
-│   ├── 02-SPEC-TEMPLATE.md  # Plantilla para crear especificaciones
-│   ├── 03-PLAN-TEMPLATE.md  # Plantilla para planes técnicos
-│   ├── 04-TASK-TEMPLATE.md  # Plantilla para desglose de tareas
-│   ├── 05-SDD-GUIDE.md      # Guía de Spec-Driven Development
-│   ├── 06-WORKFLOW.md        # Flujo de trabajo del proyecto
-│   └── 07-CONVENTIONS.md    # Convenciones y estándares
-├── specs/                    # Especificaciones del producto (PRDs)
-│   └── .gitkeep
-├── plans/                    # Planes técnicos de implementación
-│   └── .gitkeep
-├── tasks/                    # Desglose de tareas
-│   └── .gitkeep
-├── src/                      # Código fuente
-│   └── .gitkeep
-├── tests/                    # Tests
-│   └── .gitkeep
-├── .editorconfig             # Configuración del editor
-├── .gitignore                # Archivos ignorados por git
-├── CHANGELOG.md              # Registro de cambios
-├── LICENSE                   # Licencia del proyecto
-└── README.md                 # Este archivo
-```
-
-## ⚡ Inicio Rápido
-
-### 1. Lee la constitución del proyecto
-```
-docs/01-CONSTITUTION.md
-```
-
-### 2. Comprende el flujo de trabajo SDD
-```
-docs/06-WORKFLOW.md
-```
-
-### 3. Crea tu primera especificación
-Usa la plantilla en `docs/02-SPEC-TEMPLATE.md` y guarda el resultado en `specs/`.
-
-### 4. Genera el plan técnico
-Usa la plantilla en `docs/03-PLAN-TEMPLATE.md` y guarda el resultado en `plans/`.
-
-### 5. Desglosa en tareas
-Usa la plantilla en `docs/04-TASK-TEMPLATE.md` y guarda el resultado en `tasks/`.
-
-## 📚 Documentación
-
-Toda la documentación se encuentra en la carpeta [`docs/`](./docs/). Comienza por el [Índice Maestro](./docs/00-INDEX.md).
-
-## 🔧 Basado en
-
-Este proyecto utiliza la metodología y estructura de [Spec Kit](https://github.com/github/spec-kit) de GitHub — un toolkit de código abierto para Spec-Driven Development.
-
-## 📄 Licencia
-
-MIT License — ver [LICENSE](./LICENSE) para detalles.
+---
+*Hecho para permitir la agencia colaborativa distribuida sin depender de la nube.*
