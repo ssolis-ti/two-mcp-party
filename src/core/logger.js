@@ -8,6 +8,7 @@ export const logger = pino({
       colorize: true,
       translateTime: 'SYS:standard',
       ignore: 'pid,hostname',
+      destination: 2 // OBLIGATORIO: stderr (2) para no corromper el MCP por stdio
     },
   },
 });
