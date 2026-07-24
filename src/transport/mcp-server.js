@@ -7,10 +7,14 @@ import { logger } from '../core/logger.js';
 export class MCPServerTransport {
   constructor(engine) {
     this.engine = engine;
-    this.server = new Server(
+  }
+
+  // Factoría para crear un nuevo servidor MCP por cada cliente conectado
+  createServerInstance() {
+    const server = new Server(
       {
         name: 'agentbridge-hub',
-        version: '0.1.0',
+        version: '1.2.0',
       },
       {
         capabilities: {
@@ -19,12 +23,8 @@ export class MCPServerTransport {
       }
     );
 
-    this.setupHandlers();
-  }
-
-  setupHandlers() {
     // 1. List Tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
       const tools = this.engine.getTools();
       return {
         tools: tools.map((t) => ({
@@ -36,7 +36,7 @@ export class MCPServerTransport {
     });
 
     // 2. Call Tool
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const tools = this.engine.getTools();
       const toolName = request.params.name;
       const args = request.params.arguments || {};
@@ -50,7 +50,6 @@ export class MCPServerTransport {
         logger.debug({ tool: toolName, args }, 'Calling MCP tool');
         const result = await tool.handler(args, this.engine);
         
-        // MCP requiere que el resultado sea un array de contenido
         return {
           content: [
             {
@@ -72,6 +71,8 @@ export class MCPServerTransport {
         };
       }
     });
+
+    return server;
   }
 
   async start() {
@@ -81,20 +82,18 @@ export class MCPServerTransport {
     const sessions = new Map();
 
     app.use((req, res, next) => {
-      logger.info({ method: req.method, url: req.originalUrl, query: req.query, headers: req.headers }, 'Incoming Request');
+      // logger.info({ method: req.method, url: req.originalUrl, query: req.query, headers: req.headers }, 'Incoming Request');
       next();
     });
 
     const route = async (req, res) => {
       const sessionId = req.query.sessionId || req.headers['mcp-session-id'] || req.headers['sessionid'];
       
-      // Si la petición ya tiene una sesión activa, enrutarla
       if (sessionId && sessions.has(sessionId)) {
         await sessions.get(sessionId).handleRequest(req, res, req.body);
         return;
       }
       
-      // Si no tiene sesión (es decir, es una inicialización GET o POST inicial)
       if (!sessionId) {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
@@ -111,7 +110,8 @@ export class MCPServerTransport {
           }
         };
 
-        await this.server.connect(transport);
+        const clientServer = this.createServerInstance();
+        await clientServer.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;
       }
@@ -120,12 +120,9 @@ export class MCPServerTransport {
       res.status(404).send('Session not found');
     };
 
-    // Antigravity (y otros) conectan a /sse pero envían GET, POST y DELETE a la misma base
     app.get('/sse', route);
     app.post('/sse', route);
     app.delete('/sse', route);
-    
-    // Y para mantener retrocompatibilidad (por si algún cliente aún usa /message)
     app.post('/message', route);
 
     app.listen(port, () => {
