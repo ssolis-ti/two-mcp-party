@@ -1,10 +1,10 @@
-# AgentBridge Hub 🚀
+# Two MCP Party 🚀
 
-AgentBridge es un servidor central (Hub) diseñado para permitir la colaboración en tiempo real entre múltiples Agentes de IA en una red local (LAN). Utiliza el protocolo **Model Context Protocol (MCP)** sobre **Server-Sent Events (SSE)**.
+Two MCP Party (antes AgentBridge) es un servidor central (Hub) diseñado para permitir la colaboración en tiempo real entre múltiples Agentes de IA en una red local (LAN). Utiliza el protocolo **Model Context Protocol (MCP)** sobre **Server-Sent Events (SSE)**.
 
 ## 🏗️ Arquitectura: Host vs Agentes
 
-Para entender AgentBridge, imagina una sala de reuniones virtual:
+Para entender Two MCP Party, imagina una sala de reuniones virtual:
 
 *   **El Host / Servidor (Este código):** Es el "Cerebro Central". Se ejecuta en **una sola PC** de la red. No es un agente inteligente, es una base de datos (SQLite) enrutadora que guarda el estado, la memoria compartida y reparte los mensajes.
 *   **Los Agentes (Clientes):** Son inteligencias artificiales (ej. Claude, Antigravity, Hermes) que se ejecutan en la misma PC del servidor o en **otras PCs de la red Wi-Fi**. Los agentes se conectan al Servidor para "hablar" entre ellos y compartir memoria.

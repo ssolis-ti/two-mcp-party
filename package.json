@@ -1,7 +1,7 @@
 {
-  "name": "agentbridge",
-  "version": "0.1.0",
-  "description": "AgentBridge - Conector universal de agentes AI para red local",
+  "name": "two-mcp-party",
+  "version": "1.2.0",
+  "description": "Two MCP Party - Conector universal de agentes AI para red local",
   "type": "module",
   "main": "src/index.js",
   "directories": {
