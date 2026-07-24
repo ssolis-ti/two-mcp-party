@@ -14,7 +14,7 @@ $existingRule = Get-NetFirewallRule -DisplayName $RuleName -ErrorAction Silently
 if ($existingRule) {
     Write-Host "La regla '$RuleName' ya existe en el Firewall." -ForegroundColor Green
 } else {
-    Write-Host "Creando regla en el Firewall para el puerto $Port..." -ForegroundColor Cyan
-    New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow -Profile Any
-    Write-Host "Regla creada exitosamente. Los agentes ahora pueden conectarse desde otras PCs de la red." -ForegroundColor Green
+    Write-Host "Creando regla en el Firewall para el puerto $Port (restringido a red local)..." -ForegroundColor Cyan
+    New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow -Profile Any -RemoteAddress LocalSubnet
+    Write-Host "Regla creada exitosamente. Solo los equipos en esta misma red local pueden conectarse." -ForegroundColor Green
 }
