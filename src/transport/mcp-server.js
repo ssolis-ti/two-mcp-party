@@ -1,5 +1,5 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express from 'express';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from '../core/logger.js';
@@ -76,57 +76,62 @@ export class MCPServerTransport {
 
   async start() {
     const port = process.env.PORT || 3579;
-    
     const app = express();
-    
-    // Mapa para almacenar todas las conexiones SSE activas por sessionId
-    const transports = new Map();
+    const { randomUUID } = await import('node:crypto');
+    const sessions = new Map();
 
-    // Logger de todas las peticiones
     app.use((req, res, next) => {
       logger.info({ method: req.method, url: req.originalUrl, query: req.query, headers: req.headers }, 'Incoming Request');
       next();
     });
 
-    // Ruta principal para conectarse vía SSE
-    app.get('/sse', async (req, res) => {
-      // El cliente mandará sus POSTs a /message?sessionId=...
-      const transport = new SSEServerTransport('/message', res);
-      await this.server.connect(transport);
+    const route = async (req, res) => {
+      const sessionId = req.query.sessionId || req.headers['mcp-session-id'] || req.headers['sessionid'];
       
-      // Guardar el transport en el mapa usando el sessionId que generó el SDK
-      if (transport.sessionId) {
-        transports.set(transport.sessionId, transport);
-        logger.info({ sessionId: transport.sessionId }, 'Created new SSE transport session');
+      // Si la petición ya tiene una sesión activa, enrutarla
+      if (sessionId && sessions.has(sessionId)) {
+        await sessions.get(sessionId).handleRequest(req, res, req.body);
+        return;
+      }
+      
+      // Si no tiene sesión (es decir, es una inicialización GET o POST inicial)
+      if (!sessionId) {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+        });
         
         transport.onclose = () => {
-          logger.info({ sessionId: transport.sessionId }, 'Client SSE disconnected');
-          transports.delete(transport.sessionId);
+          if (transport.sessionId) {
+            logger.info({ sessionId: transport.sessionId }, 'Client disconnected');
+            sessions.delete(transport.sessionId);
+          }
         };
-      }
-    });
 
-    // Ruta para recibir los mensajes del cliente (POST)
-    app.post('/message', async (req, res) => {
-      // Soportar sessionId tanto en query como en headers (para clientes modernos)
-      const sessionId = req.query.sessionId || req.headers['mcp-session-id'] || req.headers['sessionid'];
-      const transport = transports.get(sessionId);
-      
-      if (!transport) {
-        logger.warn({ requestedSessionId: sessionId, activeSessions: Array.from(transports.keys()) }, 'Received POST for unknown session');
-        res.status(404).send('Session not found');
+        await this.server.connect(transport);
+        
+        if (transport.sessionId) {
+          sessions.set(transport.sessionId, transport);
+          logger.info({ sessionId: transport.sessionId }, 'Created new transport session');
+        }
+        
+        await transport.handleRequest(req, res, req.body);
         return;
       }
 
-      try {
-        await transport.handlePostMessage(req, res);
-      } catch (err) {
-        logger.error({ err, sessionId }, 'Error handling POST message');
-      }
-    });
+      logger.warn({ requestedSessionId: sessionId, activeSessions: Array.from(sessions.keys()) }, 'Received POST for unknown session');
+      res.status(404).send('Session not found');
+    };
+
+    // Antigravity (y otros) conectan a /sse pero envían GET, POST y DELETE a la misma base
+    app.get('/sse', route);
+    app.post('/sse', route);
+    app.delete('/sse', route);
+    
+    // Y para mantener retrocompatibilidad (por si algún cliente aún usa /message)
+    app.post('/message', route);
 
     app.listen(port, () => {
-      logger.info(`Starting MCP Server (SSE transport) on http://0.0.0.0:${port}`);
+      logger.info(`Starting MCP Server (Streamable HTTP) on http://0.0.0.0:${port}`);
       logger.info(`Agents in your LAN can connect to: http://<YOUR_IP>:${port}/sse`);
     });
   }
