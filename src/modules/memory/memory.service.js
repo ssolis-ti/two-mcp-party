@@ -7,67 +7,75 @@ export class MemoryService {
   }
 
   shareMemory(payload) {
-    const { namespace = 'global', key, value, agent } = payload;
+    const { key, value, agent } = payload;
 
-    if (!key || value === undefined) {
-      throw new Error('key and value are required');
+    if (!key || value === undefined || !agent) {
+      throw new Error('key, value, and agent are required');
     }
 
     try {
+      const agentRec = this.db.prepare('SELECT current_session_id FROM agents WHERE name = ?').get(agent);
+      if (!agentRec || !agentRec.current_session_id) {
+        throw new Error('You must join a session before sharing memory. Use bridge_join_session.');
+      }
+      
+      const sessionId = agentRec.current_session_id;
+
       const stmt = this.db.prepare(`
-        INSERT INTO shared_memory (namespace, key, value, agent_owner, updated_at)
+        INSERT INTO shared_memory (session_id, key, value, agent_owner, updated_at)
         VALUES (?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(namespace, key) DO UPDATE SET 
+        ON CONFLICT(session_id, key) DO UPDATE SET 
           value = excluded.value,
           agent_owner = excluded.agent_owner,
           updated_at = datetime('now')
       `);
       
       stmt.run(
-        namespace, 
+        sessionId, 
         key, 
         typeof value === 'object' ? JSON.stringify(value) : value, 
-        agent || null
+        agent
       );
 
-      const memEntry = { namespace, key, value, agent };
+      const memEntry = { session_id: sessionId, key, value, agent };
       
       this.eventBus.emit('memory:updated', memEntry);
-      
-      logger.debug({ namespace, key }, 'Memory updated');
-      return { success: true, namespace, key };
+      logger.debug({ session_id: sessionId, key }, 'Memory updated');
+      return { success: true, session_id: sessionId, key };
     } catch (err) {
-      logger.error({ err, namespace, key }, 'Failed to share memory');
+      logger.error({ err, key }, 'Failed to share memory');
       throw err;
     }
   }
 
-  getMemory(namespace = 'global', key = null) {
+  getMemory(agentName, key = null) {
+    if (!agentName) throw new Error('Agent name is required');
+    
     try {
+      const agentRec = this.db.prepare('SELECT current_session_id FROM agents WHERE name = ?').get(agentName);
+      if (!agentRec || !agentRec.current_session_id) {
+        throw new Error('You must join a session before reading memory. Use bridge_join_session.');
+      }
+      const sessionId = agentRec.current_session_id;
+
       if (key) {
-        const stmt = this.db.prepare('SELECT * FROM shared_memory WHERE namespace = ? AND key = ?');
-        const entry = stmt.get(namespace, key);
+        const stmt = this.db.prepare('SELECT * FROM shared_memory WHERE session_id = ? AND key = ?');
+        const entry = stmt.get(sessionId, key);
         
         if (!entry) return null;
-        
-        try {
-          entry.value = JSON.parse(entry.value);
-        } catch(e) {} // If not JSON, leave as string
-        
+        try { entry.value = JSON.parse(entry.value); } catch(e) {}
         return entry;
       } else {
-        const stmt = this.db.prepare('SELECT * FROM shared_memory WHERE namespace = ?');
-        const entries = stmt.all(namespace);
+        const stmt = this.db.prepare('SELECT * FROM shared_memory WHERE session_id = ?');
+        const entries = stmt.all(sessionId);
         
         return entries.map(entry => {
-          try {
-            entry.value = JSON.parse(entry.value);
-          } catch(e) {}
+          try { entry.value = JSON.parse(entry.value); } catch(e) {}
           return entry;
         });
       }
     } catch (err) {
-      logger.error({ err, namespace, key }, 'Failed to get memory');
+      logger.error({ err, key }, 'Failed to get memory');
       throw err;
     }
   }
