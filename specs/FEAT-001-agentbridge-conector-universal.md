@@ -122,6 +122,16 @@
 - [ ] Cada entrada incluye: nombre, tipo, capacidades, estado, última actividad
 - [ ] Se distingue entre agentes online y offline
 
+### US-008: Heartbeat (Ping de Estado)
+**Como** agente AI conectado
+**Quiero** enviar un ping o heartbeat periódicamente
+**Para** que el hub y otros agentes sepan que sigo activo (live)
+
+**Criterios de Aceptación:**
+- [ ] El agente puede llamar `bridge_heartbeat` para actualizar su `last_seen`
+- [ ] El hub marca automáticamente como `offline` a los agentes que no enviaron heartbeat en X minutos (timeout)
+- [ ] El estado `online`/`offline` se refleja en `bridge_list_agents`
+
 ---
 
 ## 🎨 Diseño & UX
