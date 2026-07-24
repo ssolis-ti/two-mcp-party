@@ -1,0 +1,35 @@
+# Spec Kit Project Configuration
+# Basado en https://github.com/github/spec-kit
+
+project:
+  name: "Two"
+  version: "0.1.0"
+  description: "[PENDIENTE: Definir la idea central del proyecto]"
+  created: "2026-07-24"
+
+# Metodología SDD
+sdd:
+  enabled: true
+  phases:
+    - constitution    # Principios gobernantes
+    - specification   # PRD del producto
+    - planning        # Plan técnico
+    - tasking         # Desglose de tareas
+    - implementation  # Ejecución
+    - validation      # Verificación
+
+# Directorios del proyecto
+paths:
+  specs: "specs/"
+  plans: "plans/"
+  tasks: "tasks/"
+  source: "src/"
+  tests: "tests/"
+  docs: "docs/"
+
+# Validación
+validation:
+  require_spec_before_code: true
+  require_plan_before_implementation: true
+  require_changelog_update: true
+  auto_check_consistency: true
