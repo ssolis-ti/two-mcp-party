@@ -77,24 +77,45 @@ export class MCPServerTransport {
   async start() {
     const port = process.env.PORT || 3579;
     
-    // Iniciar Express para manejar conexiones HTTP/SSE desde la red LAN
     const app = express();
     
-    let transport;
+    // Mapa para almacenar todas las conexiones SSE activas por sessionId
+    const transports = new Map();
 
     // Ruta principal para conectarse vía SSE
     app.get('/sse', async (req, res) => {
       logger.info({ ip: req.ip }, 'New client connecting via SSE');
-      transport = new SSEServerTransport('/message', res);
+      
+      // El cliente mandará sus POSTs a /message?sessionId=...
+      const transport = new SSEServerTransport('/message', res);
       await this.server.connect(transport);
+      
+      // Guardar el transport en el mapa usando el sessionId que generó el SDK
+      if (transport.sessionId) {
+        transports.set(transport.sessionId, transport);
+        
+        transport.onclose = () => {
+          logger.info({ sessionId: transport.sessionId }, 'Client SSE disconnected');
+          transports.delete(transport.sessionId);
+        };
+      }
     });
 
     // Ruta para recibir los mensajes del cliente (POST)
     app.post('/message', async (req, res) => {
-      if (transport) {
+      const sessionId = req.query.sessionId;
+      const transport = transports.get(sessionId);
+      
+      if (!transport) {
+        logger.warn({ sessionId }, 'Received POST for unknown session');
+        res.status(404).send('Session not found');
+        return;
+      }
+
+      try {
         await transport.handlePostMessage(req, res);
-      } else {
-        res.status(400).send('No active SSE connection');
+      } catch (err) {
+        logger.error({ err, sessionId }, 'Error handling POST message');
       }
     });
 
