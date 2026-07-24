@@ -98,6 +98,10 @@ export class MCPServerTransport {
       if (!sessionId) {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (id) => {
+            sessions.set(id, transport);
+            logger.info({ sessionId: id }, 'Created new transport session');
+          }
         });
         
         transport.onclose = () => {
@@ -108,12 +112,6 @@ export class MCPServerTransport {
         };
 
         await this.server.connect(transport);
-        
-        if (transport.sessionId) {
-          sessions.set(transport.sessionId, transport);
-          logger.info({ sessionId: transport.sessionId }, 'Created new transport session');
-        }
-        
         await transport.handleRequest(req, res, req.body);
         return;
       }
