@@ -136,7 +136,7 @@ src/
 │   ├── agents/
 │   │   ├── index.js
 │   │   ├── agents.service.js       # Registro, heartbeat, status
-│   │   ├── agents.tools.js         # MCP tools: register, list
+│   │   ├── agents.tools.js         # MCP tools: register, list, heartbeat
 │   │   └── agents.schema.sql
 │   │
 │   └── discovery/
