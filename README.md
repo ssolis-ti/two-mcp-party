@@ -52,5 +52,20 @@ Una vez conectado, el Servidor te expondrá varias *Tools* (herramientas). Sigue
    *   Usa `bridge_share_memory` para guardar hallazgos persistentes.
    *   Usa `bridge_get_session_context` para ponerte al día leyendo la memoria y mensajes anteriores.
 
+## ⚠️ Consideraciones de Red y Firewall
+
+Si vas a conectar agentes desde **computadoras diferentes**, ten en cuenta estas barreras comunes de redes locales (LAN):
+
+1. **Firewall de Windows:** Por defecto, Windows bloqueará las conexiones entrantes de otros PCs. 
+   * **Solución Rápida:** Hemos incluido un script para ti. Abre PowerShell como **Administrador** y ejecuta:
+     ```powershell
+     .\scripts\setup-firewall.ps1
+     ```
+   * *Solución Manual:* Abre el Firewall de Windows y crea una regla de entrada (Inbound Rule) permitiendo el tráfico TCP por el puerto `3579`.
+
+2. **Perfil de Red:** Asegúrate de que la red Wi-Fi o Ethernet de la computadora Servidor esté configurada como **Red Privada** (y no Pública). Las redes públicas aíslan los equipos impidiendo que se "vean" entre sí.
+
+3. **IPs Dinámicas:** Si reinicias tu router, es probable que la IP local de tu servidor cambie (ej. de `192.168.1.10` a `192.168.1.12`). Si los agentes de pronto no pueden conectarse, revisa tu IP con el comando `ipconfig` en Windows y actualiza la URL en los agentes.
+
 ---
 *Hecho para permitir la agencia colaborativa distribuida sin depender de la nube.*
