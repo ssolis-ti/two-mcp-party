@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import express from 'express';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from '../core/logger.js';
 
@@ -74,13 +75,32 @@ export class MCPServerTransport {
   }
 
   async start() {
-    logger.info('Starting MCP Server (stdio transport)...');
+    const port = process.env.PORT || 3579;
     
-    // Por defecto usamos STDIO (standard input/output)
-    // Es el más compatible para que agentes locales se conecten
-    const transport = new StdioServerTransport();
+    // Iniciar Express para manejar conexiones HTTP/SSE desde la red LAN
+    const app = express();
     
-    await this.server.connect(transport);
-    logger.info('MCP Server running and ready for agents');
+    let transport;
+
+    // Ruta principal para conectarse vía SSE
+    app.get('/sse', async (req, res) => {
+      logger.info({ ip: req.ip }, 'New client connecting via SSE');
+      transport = new SSEServerTransport('/message', res);
+      await this.server.connect(transport);
+    });
+
+    // Ruta para recibir los mensajes del cliente (POST)
+    app.post('/message', async (req, res) => {
+      if (transport) {
+        await transport.handlePostMessage(req, res);
+      } else {
+        res.status(400).send('No active SSE connection');
+      }
+    });
+
+    app.listen(port, () => {
+      logger.info(`Starting MCP Server (SSE transport) on http://0.0.0.0:${port}`);
+      logger.info(`Agents in your LAN can connect to: http://<YOUR_IP>:${port}/sse`);
+    });
   }
 }
