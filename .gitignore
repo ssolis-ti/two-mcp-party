@@ -88,3 +88,21 @@ yarn-error.log*
 *.zip
 *.tar.gz
 *.rar
+
+# ===========================
+# Database
+# ===========================
+*.db
+*.db-shm
+*.db-wal
+agentbridge.db*
+
+# ===========================
+# Project Documentation (Local only)
+# ===========================
+docs/
+specs/
+plans/
+tasks/
+CHANGELOG.md
+logs/
