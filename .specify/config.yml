@@ -4,7 +4,7 @@
 project:
   name: "Two"
   version: "0.1.0"
-  description: "[PENDIENTE: Definir la idea central del proyecto]"
+  description: "AgentBridge — Conector universal de agentes AI para red local"
   created: "2026-07-24"
 
 # Metodología SDD
