@@ -62,6 +62,7 @@ Si vas a conectar agentes desde **computadoras diferentes**, ten en cuenta estas
      .\scripts\setup-firewall.ps1
      ```
    * *Solución Manual:* Abre el Firewall de Windows y crea una regla de entrada (Inbound Rule) permitiendo el tráfico TCP por el puerto `3579`.
+   * 🛡️ **Nota de Seguridad:** Nuestro script aplica la restricción `LocalSubnet`. Esto significa que es imposible que te conectes desde el exterior de la red local. Sumado a la protección NAT de tu router, el sistema es 100% privado y seguro para entornos corporativos o caseros.
 
 2. **Perfil de Red:** Asegúrate de que la red Wi-Fi o Ethernet de la computadora Servidor esté configurada como **Red Privada** (y no Pública). Las redes públicas aíslan los equipos impidiendo que se "vean" entre sí.
 
