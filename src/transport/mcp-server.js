@@ -82,10 +82,14 @@ export class MCPServerTransport {
     // Mapa para almacenar todas las conexiones SSE activas por sessionId
     const transports = new Map();
 
+    // Logger de todas las peticiones
+    app.use((req, res, next) => {
+      logger.info({ method: req.method, url: req.originalUrl, query: req.query, headers: req.headers }, 'Incoming Request');
+      next();
+    });
+
     // Ruta principal para conectarse vía SSE
     app.get('/sse', async (req, res) => {
-      logger.info({ ip: req.ip }, 'New client connecting via SSE');
-      
       // El cliente mandará sus POSTs a /message?sessionId=...
       const transport = new SSEServerTransport('/message', res);
       await this.server.connect(transport);
@@ -93,6 +97,7 @@ export class MCPServerTransport {
       // Guardar el transport en el mapa usando el sessionId que generó el SDK
       if (transport.sessionId) {
         transports.set(transport.sessionId, transport);
+        logger.info({ sessionId: transport.sessionId }, 'Created new SSE transport session');
         
         transport.onclose = () => {
           logger.info({ sessionId: transport.sessionId }, 'Client SSE disconnected');
@@ -103,11 +108,12 @@ export class MCPServerTransport {
 
     // Ruta para recibir los mensajes del cliente (POST)
     app.post('/message', async (req, res) => {
-      const sessionId = req.query.sessionId;
+      // Soportar sessionId tanto en query como en headers (para clientes modernos)
+      const sessionId = req.query.sessionId || req.headers['mcp-session-id'] || req.headers['sessionid'];
       const transport = transports.get(sessionId);
       
       if (!transport) {
-        logger.warn({ sessionId }, 'Received POST for unknown session');
+        logger.warn({ requestedSessionId: sessionId, activeSessions: Array.from(transports.keys()) }, 'Received POST for unknown session');
         res.status(404).send('Session not found');
         return;
       }
