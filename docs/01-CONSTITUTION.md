@@ -7,7 +7,7 @@
 
 ## 🎯 Misión
 
-> **[PENDIENTE]**: Definir la misión central del proyecto una vez que se establezca la idea base.
+> **Crear un conector universal que permita a cualquier agente AI de coding comunicarse, compartir contexto y potenciarse mutuamente en una red local, eliminando los silos entre herramientas y amplificando la capacidad colectiva de los agentes.**
 
 ---
 

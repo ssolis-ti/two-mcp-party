@@ -1,11 +1,11 @@
-# 🌱 Project Two
+# 🌉 AgentBridge
 
-> *Define what to build before building it.*
+> *Conecta, potencia y sincroniza tus agentes AI.*
 
 ---
 
 <p align="center">
-    <strong>Un proyecto construido con la metodología Spec-Driven Development (SDD), donde las especificaciones son el artefacto principal y el código es su expresión.</strong>
+    <strong>Un conector universal que permite a 2+ agentes AI de coding (Antigravity, Hermes, Claude Code, OpenCode, OpenClaw, Cursor...) comunicarse, compartir memoria y colaborar en red local. Construido con MCP como protocolo universal.</strong>
 </p>
 
 ---
