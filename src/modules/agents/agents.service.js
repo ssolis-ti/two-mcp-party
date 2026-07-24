@@ -17,12 +17,12 @@ export class AgentsService {
 
     try {
       // Verificar si ya existe
-      const existing = this.db.prepare('SELECT id FROM agents WHERE name = ?').get(name);
+      const existing = this.db.prepare('SELECT id, current_session_id FROM agents WHERE name = ?').get(name);
       
       let agentId;
       if (existing) {
         agentId = existing.id;
-        // Actualizar datos
+        // Actualizar datos pero mantener su sesión actual
         const stmt = this.db.prepare(`
           UPDATE agents 
           SET type = ?, description = ?, capabilities = ?, status = 'online', last_seen = datetime('now')
@@ -42,12 +42,26 @@ export class AgentsService {
       }
 
       this.eventBus.emit('agent:registered', { agentId, name });
-      return { agentId, name, status: 'online' };
+      return { agentId, name, status: 'online', current_session_id: existing?.current_session_id || null };
 
     } catch (err) {
       logger.error({ err, name }, 'Error registering agent');
       throw err;
     }
+  }
+
+  setCurrentSession(name, sessionId) {
+    const stmt = this.db.prepare(`
+      UPDATE agents SET current_session_id = ?, last_seen = datetime('now'), status = 'online'
+      WHERE name = ?
+    `);
+    const result = stmt.run(sessionId, name);
+    if (result.changes === 0) throw new Error(`Agent ${name} not found`);
+  }
+
+  getAgent(name) {
+    const stmt = this.db.prepare('SELECT * FROM agents WHERE name = ?');
+    return stmt.get(name);
   }
 
   heartbeat(name) {
@@ -68,13 +82,11 @@ export class AgentsService {
   }
 
   listAgents() {
-    // Primero, marcar offline a los que expiraron
     this.checkTimeouts();
 
     const stmt = this.db.prepare('SELECT * FROM agents ORDER BY last_seen DESC');
     const agents = stmt.all();
     
-    // Parsear JSON
     return agents.map(a => ({
       ...a,
       capabilities: a.capabilities ? JSON.parse(a.capabilities) : [],
@@ -83,7 +95,6 @@ export class AgentsService {
   }
 
   checkTimeouts() {
-    // Cualquier agente no visto en los últimos 5 minutos es marcado como offline
     const stmt = this.db.prepare(`
       UPDATE agents 
       SET status = 'offline' 

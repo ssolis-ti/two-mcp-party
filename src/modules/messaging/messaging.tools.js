@@ -2,12 +2,11 @@ export function getMessagingTools(service) {
   return [
     {
       name: 'bridge_send_message',
-      description: 'Send a message or finding to a specific agent.',
+      description: 'Send a message to your active session. You must be in a session to send a message.',
       schema: {
         type: 'object',
         properties: {
           from: { type: 'string', description: 'Your agent name' },
-          to: { type: 'string', description: 'The target agent name' },
           content: { type: 'string', description: 'The message content (Markdown supported)' },
           type: { 
             type: 'string', 
@@ -16,32 +15,15 @@ export function getMessagingTools(service) {
           },
           metadata: { type: 'object', description: 'Optional extra data' }
         },
-        required: ['from', 'to', 'content']
+        required: ['from', 'content']
       },
       handler: async (args, engine) => {
         return service.sendMessage(args);
       }
     },
     {
-      name: 'bridge_broadcast',
-      description: 'Send a message to ALL connected agents simultaneously.',
-      schema: {
-        type: 'object',
-        properties: {
-          from: { type: 'string', description: 'Your agent name' },
-          content: { type: 'string', description: 'The message content' },
-          type: { type: 'string', default: 'message' }
-        },
-        required: ['from', 'content']
-      },
-      handler: async (args, engine) => {
-        // En broadcast, to es null
-        return service.sendMessage({ ...args, to: null });
-      }
-    },
-    {
       name: 'bridge_get_messages',
-      description: 'Read the latest messages sent to you or broadcasted to everyone.',
+      description: 'Read the chronological history of messages in your active session.',
       schema: {
         type: 'object',
         properties: {
