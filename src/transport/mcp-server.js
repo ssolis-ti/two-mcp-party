@@ -41,13 +41,13 @@ export class MCPServerTransport {
     // 2. List Resources
     server.setRequestHandler(ListResourcesRequestSchema, async () => {
       try {
-        const docsPath = path.join(process.cwd(), 'docs');
+        const docsPath = path.join(process.cwd(), 'agent-manual');
         const files = await fs.readdir(docsPath);
         
         const resources = files
           .filter(file => file.endsWith('.md'))
           .map(file => ({
-            uri: `file:///docs/${file}`,
+            uri: `file:///agent-manual/${file}`,
             name: file,
             mimeType: 'text/markdown',
             description: `AgentBridge Documentation: ${file}`
@@ -64,12 +64,12 @@ export class MCPServerTransport {
     server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       const uri = request.params.uri;
       
-      if (!uri.startsWith('file:///docs/')) {
+      if (!uri.startsWith('file:///agent-manual/')) {
         throw new Error(`Invalid resource URI: ${uri}`);
       }
 
-      const filename = uri.replace('file:///docs/', '');
-      const docsPath = path.join(process.cwd(), 'docs');
+      const filename = uri.replace('file:///agent-manual/', '');
+      const docsPath = path.join(process.cwd(), 'agent-manual');
       const absolutePath = path.resolve(docsPath, filename);
 
       // Path traversal check
