@@ -13,12 +13,29 @@ export function getMessagingTools(service) {
             description: 'Type of message (message, finding, question, answer)',
             default: 'message'
           },
-          metadata: { type: 'object', description: 'Optional extra data' }
+          metadata: { type: 'object', description: 'Optional extra data' },
+          yield_to: { type: 'string', description: 'Optional agent name to yield the turn to. Use "any" to open the floor.' },
+          priority: { type: 'string', description: 'Priority level: normal, high, critical. Critical bypasses turn locks.', default: 'normal' }
         },
         required: ['from', 'content']
       },
       handler: async (args, engine) => {
         return service.sendMessage(args);
+      }
+    },
+    {
+      name: 'bridge_yield_turn',
+      description: 'Explicitly yield your turn to another agent without sending a message.',
+      schema: {
+        type: 'object',
+        properties: {
+          agent_name: { type: 'string', description: 'Your agent name' },
+          yield_to: { type: 'string', description: 'Agent name to yield the turn to. Use "any" to open the floor.' }
+        },
+        required: ['agent_name', 'yield_to']
+      },
+      handler: async (args, engine) => {
+        return service.yieldTurn(args.agent_name, args.yield_to);
       }
     },
     {

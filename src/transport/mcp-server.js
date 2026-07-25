@@ -80,7 +80,26 @@ export class MCPServerTransport {
     const app = express();
     app.use(express.json());
     const { randomUUID } = await import('node:crypto');
-    const sessions = new Map();
+    const transportSessions = new Map();
+
+    // === PUSH NOTIFICATIONS (SSE) ===
+    const sseClients = new Set();
+    app.get('/api/events', (req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+      res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+      sseClients.add(res);
+      req.on('close', () => sseClients.delete(res));
+    });
+
+    this.engine.eventBus.on('message:new', (msg) => {
+      const payload = JSON.stringify({ type: 'message', data: msg });
+      sseClients.forEach(client => client.write(`data: ${payload}\n\n`));
+    });
+    // ================================
 
     app.use((req, res, next) => {
       // logger.info({ method: req.method, url: req.originalUrl, query: req.query, headers: req.headers }, 'Incoming Request');
@@ -90,8 +109,8 @@ export class MCPServerTransport {
     const route = async (req, res) => {
       const sessionId = req.query.sessionId || req.headers['mcp-session-id'] || req.headers['sessionid'];
       
-      if (sessionId && sessions.has(sessionId)) {
-        const activeTransport = sessions.get(sessionId);
+      if (sessionId && transportSessions.has(sessionId)) {
+        const activeTransport = transportSessions.get(sessionId);
         activeTransport._lastActivity = Date.now();
         await activeTransport.handleRequest(req, res, req.body);
         return;
@@ -102,7 +121,7 @@ export class MCPServerTransport {
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
             transport._lastActivity = Date.now();
-            sessions.set(id, transport);
+            transportSessions.set(id, transport);
             logger.info({ sessionId: id }, 'Created new transport session');
           }
         });
@@ -111,7 +130,7 @@ export class MCPServerTransport {
           if (transport.sessionId) {
             logger.info({ sessionId: transport.sessionId }, 'Client transport closed (HTTP request finished)');
             // Fix: No eliminar aquí, ya que MCP v2 llama a onclose tras CADA request (GET/POST)
-            // sessions.delete(transport.sessionId);
+            // transportSessions.delete(transport.sessionId);
           }
         };
 
@@ -121,17 +140,17 @@ export class MCPServerTransport {
         return;
       }
 
-      logger.warn({ requestedSessionId: sessionId, activeSessions: Array.from(sessions.keys()) }, 'Received POST for unknown session');
+      logger.warn({ requestedSessionId: sessionId, activeSessions: Array.from(transportSessions.keys()) }, 'Received POST for unknown session');
       res.status(404).send('Session not found');
     };
 
     // Cleanup de sesiones inactivas (cada 5 min)
     setInterval(() => {
       const now = Date.now();
-      for (const [id, transport] of sessions) {
+      for (const [id, transport] of transportSessions) {
         if (transport.sessionId && (now - (transport._lastActivity || now)) > 300000) {
           logger.info({ sessionId: id }, 'Removing inactive session');
-          sessions.delete(id);
+          transportSessions.delete(id);
         }
       }
     }, 300000);

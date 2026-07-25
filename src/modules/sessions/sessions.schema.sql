@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   mode        TEXT DEFAULT 'moderator',
   mode_config TEXT,
   turn_count  INTEGER DEFAULT 0,
+  current_turn TEXT,
   metadata    TEXT,
   created_at  TEXT DEFAULT (datetime('now')),
   updated_at  TEXT DEFAULT (datetime('now'))
