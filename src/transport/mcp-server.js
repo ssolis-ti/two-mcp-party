@@ -14,7 +14,7 @@ export class MCPServerTransport {
     const server = new Server(
       {
         name: 'agentbridge-hub',
-        version: '1.2.0',
+        version: '2.0.0',
       },
       {
         capabilities: {
@@ -78,6 +78,7 @@ export class MCPServerTransport {
   async start() {
     const port = process.env.PORT || 3579;
     const app = express();
+    app.use(express.json());
     const { randomUUID } = await import('node:crypto');
     const sessions = new Map();
 
