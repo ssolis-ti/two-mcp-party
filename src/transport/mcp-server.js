@@ -90,7 +90,9 @@ export class MCPServerTransport {
       const sessionId = req.query.sessionId || req.headers['mcp-session-id'] || req.headers['sessionid'];
       
       if (sessionId && sessions.has(sessionId)) {
-        await sessions.get(sessionId).handleRequest(req, res, req.body);
+        const activeTransport = sessions.get(sessionId);
+        activeTransport._lastActivity = Date.now();
+        await activeTransport.handleRequest(req, res, req.body);
         return;
       }
       
@@ -98,6 +100,7 @@ export class MCPServerTransport {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
+            transport._lastActivity = Date.now();
             sessions.set(id, transport);
             logger.info({ sessionId: id }, 'Created new transport session');
           }
@@ -105,8 +108,9 @@ export class MCPServerTransport {
         
         transport.onclose = () => {
           if (transport.sessionId) {
-            logger.info({ sessionId: transport.sessionId }, 'Client disconnected');
-            sessions.delete(transport.sessionId);
+            logger.info({ sessionId: transport.sessionId }, 'Client transport closed (HTTP request finished)');
+            // Fix: No eliminar aquí, ya que MCP v2 llama a onclose tras CADA request (GET/POST)
+            // sessions.delete(transport.sessionId);
           }
         };
 
@@ -119,6 +123,17 @@ export class MCPServerTransport {
       logger.warn({ requestedSessionId: sessionId, activeSessions: Array.from(sessions.keys()) }, 'Received POST for unknown session');
       res.status(404).send('Session not found');
     };
+
+    // Cleanup de sesiones inactivas (cada 5 min)
+    setInterval(() => {
+      const now = Date.now();
+      for (const [id, transport] of sessions) {
+        if (transport.sessionId && (now - (transport._lastActivity || now)) > 300000) {
+          logger.info({ sessionId: id }, 'Removing inactive session');
+          sessions.delete(id);
+        }
+      }
+    }, 300000);
 
     app.get('/sse', route);
     app.post('/sse', route);
