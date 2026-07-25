@@ -8,7 +8,7 @@ export class MessagingService {
   }
 
   sendMessage(payload) {
-    const { from, content, type = 'message', metadata = {} } = payload;
+    const { from, content, type = 'message', metadata = {}, yield_to = null, priority = 'normal' } = payload;
 
     if (!from || !content) {
       throw new Error('from and content are required');
@@ -29,7 +29,7 @@ export class MessagingService {
 
       // === MODE ENFORCEMENT (server-side) ===
       const session = this.db.prepare(
-        'SELECT mode, mode_config, turn_count, status FROM sessions WHERE id = ?'
+        'SELECT mode, mode_config, turn_count, status, current_turn FROM sessions WHERE id = ?'
       ).get(sessionId);
 
       if (!session) throw new Error('Session not found');
@@ -48,8 +48,23 @@ export class MessagingService {
         throw new Error(`Session status is '${session.status}'. Only active sessions accept messages.`);
       }
 
-      // 2. Autopilot: verificar límite de turnos
-      if (session.mode === 'autopilot') {
+      // === DPD (Dead Peer Detection) ===
+      if (session.current_turn && session.current_turn !== from) {
+        // Consultar estado del dueño actual del token
+        const currentOwner = this.db.prepare('SELECT status FROM agents WHERE name = ?').get(session.current_turn);
+        if (!currentOwner || currentOwner.status === 'offline') {
+          logger.info(`Dead Peer Detection: Reclaiming token from offline agent ${session.current_turn}`);
+          session.current_turn = null; // Liberar el candado localmente para esta iteración
+        }
+      }
+
+      // 1.5. Verificar Token de Turno (Ignorado si es critical)
+      if (priority !== 'critical' && session.current_turn && session.current_turn !== from) {
+        throw new Error(`It is not your turn. Waiting for TX token from: ${session.current_turn}`);
+      }
+
+      // 2. Autopilot: verificar límite de turnos (Bypass si es critical)
+      if (priority !== 'critical' && session.mode === 'autopilot') {
         const config = session.mode_config ? JSON.parse(session.mode_config) : {};
         const maxTurns = config.max_turns || 10;
 
@@ -63,7 +78,7 @@ export class MessagingService {
           );
         }
 
-        // 3. Autopilot: verificar cooldown
+        // 3. Autopilot: verificar cooldown (Bypass si es critical)
         const cooldownSeconds = config.cooldown_seconds || 30;
         const lastMsg = this.db.prepare(
           'SELECT created_at FROM messages WHERE session_id = ? AND from_agent = ? ORDER BY created_at DESC LIMIT 1'
@@ -85,24 +100,60 @@ export class MessagingService {
       const msgId = generateId('msg');
 
       const stmt = this.db.prepare(`
-        INSERT INTO messages (id, session_id, from_agent, content, type, metadata)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (id, session_id, from_agent, content, type, metadata, priority)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
-      stmt.run(msgId, sessionId, from, content, type, JSON.stringify(metadata));
+      stmt.run(msgId, sessionId, from, content, type, JSON.stringify(metadata), priority);
 
-      // Incrementar turn_count de la sesión
+      // Procesar yield_to y actualizar sesión
+      let nextTurn = session.current_turn;
+      if (yield_to) {
+        nextTurn = yield_to.toLowerCase() === 'any' ? null : yield_to;
+      }
+
       this.db.prepare(
-        "UPDATE sessions SET turn_count = turn_count + 1, updated_at = datetime('now') WHERE id = ?"
-      ).run(sessionId);
+        "UPDATE sessions SET turn_count = turn_count + 1, current_turn = ?, updated_at = datetime('now') WHERE id = ?"
+      ).run(nextTurn, sessionId);
 
-      const message = { id: msgId, session_id: sessionId, from, content, type, metadata, created_at: new Date().toISOString() };
+      const message = { id: msgId, session_id: sessionId, from, content, type, metadata, priority, created_at: new Date().toISOString() };
 
       this.eventBus.emit('message:new', message);
       logger.debug({ msgId, from, session_id: sessionId, mode: session.mode, turn: session.turn_count + 1 }, 'Message sent');
       return message;
     } catch (err) {
       logger.error({ err, from }, 'Failed to send message');
+      throw err;
+    }
+  }
+
+  yieldTurn(agentName, yieldTo) {
+    if (!agentName || !yieldTo) throw new Error('agentName and yieldTo are required');
+
+    try {
+      const agent = this.db.prepare('SELECT current_session_id FROM agents WHERE name = ?').get(agentName);
+      if (!agent || !agent.current_session_id) {
+        throw new Error('You must join a session to yield turn. Use bridge_join_session.');
+      }
+
+      const sessionId = agent.current_session_id;
+      const session = this.db.prepare('SELECT current_turn FROM sessions WHERE id = ?').get(sessionId);
+      
+      if (!session) throw new Error('Session not found');
+
+      if (session.current_turn && session.current_turn !== agentName) {
+        throw new Error(`It is not your turn to yield. Current turn belongs to: ${session.current_turn}`);
+      }
+
+      const nextTurn = yieldTo.toLowerCase() === 'any' ? null : yieldTo;
+
+      this.db.prepare(
+        "UPDATE sessions SET current_turn = ?, updated_at = datetime('now') WHERE id = ?"
+      ).run(nextTurn, sessionId);
+
+      return { success: true, message: `Turn yielded to ${nextTurn || 'any'}` };
+    } catch (err) {
+      logger.error({ err, agentName, yieldTo }, 'Failed to yield turn');
       throw err;
     }
   }
@@ -117,7 +168,7 @@ export class MessagingService {
       }
 
       const stmt = this.db.prepare(`
-        SELECT * FROM messages 
+        SELECT *, rowid as seq FROM messages 
         WHERE session_id = ?
         ORDER BY created_at ASC
         LIMIT ?

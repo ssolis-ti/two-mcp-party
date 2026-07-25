@@ -5,7 +5,7 @@ export class AgentsService {
   constructor(db, eventBus) {
     this.db = db;
     this.eventBus = eventBus;
-    this.heartbeatTimeout = 5 * 60 * 1000; // 5 minutos por defecto
+    this.heartbeatTimeout = 1 * 60 * 1000; // 1 minuto (Dead Peer Detection)
   }
 
   registerAgent(payload) {
@@ -98,7 +98,7 @@ export class AgentsService {
     const stmt = this.db.prepare(`
       UPDATE agents 
       SET status = 'offline' 
-      WHERE status = 'online' AND last_seen < datetime('now', '-5 minutes')
+      WHERE status = 'online' AND last_seen < datetime('now', '-1 minute')
     `);
     const result = stmt.run();
     if (result.changes > 0) {
