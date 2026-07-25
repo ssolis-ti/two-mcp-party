@@ -1,7 +1,9 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express from 'express';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import fs from 'fs/promises';
+import path from 'path';
 import { logger } from '../core/logger.js';
 
 export class MCPServerTransport {
@@ -19,6 +21,7 @@ export class MCPServerTransport {
       {
         capabilities: {
           tools: {},
+          resources: {},
         },
       }
     );
@@ -33,6 +36,61 @@ export class MCPServerTransport {
           inputSchema: t.schema || { type: 'object', properties: {} },
         })),
       };
+    });
+
+    // 2. List Resources
+    server.setRequestHandler(ListResourcesRequestSchema, async () => {
+      try {
+        const docsPath = path.join(process.cwd(), 'docs');
+        const files = await fs.readdir(docsPath);
+        
+        const resources = files
+          .filter(file => file.endsWith('.md'))
+          .map(file => ({
+            uri: `file:///docs/${file}`,
+            name: file,
+            mimeType: 'text/markdown',
+            description: `AgentBridge Documentation: ${file}`
+          }));
+
+        return { resources };
+      } catch (err) {
+        logger.error({ err }, 'Failed to list docs resources');
+        return { resources: [] };
+      }
+    });
+
+    // 3. Read Resource
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const uri = request.params.uri;
+      
+      if (!uri.startsWith('file:///docs/')) {
+        throw new Error(`Invalid resource URI: ${uri}`);
+      }
+
+      const filename = uri.replace('file:///docs/', '');
+      const docsPath = path.join(process.cwd(), 'docs');
+      const absolutePath = path.resolve(docsPath, filename);
+
+      // Path traversal check
+      if (!absolutePath.startsWith(docsPath)) {
+        throw new Error('Access denied: Invalid resource path');
+      }
+
+      try {
+        const content = await fs.readFile(absolutePath, 'utf-8');
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: 'text/markdown',
+              text: content
+            }
+          ]
+        };
+      } catch (err) {
+        throw new Error(`Failed to read resource ${filename}: ${err.message}`);
+      }
     });
 
     // 2. Call Tool
