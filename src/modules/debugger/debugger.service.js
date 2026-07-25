@@ -65,7 +65,7 @@ export class DebuggerService {
     
     // SEGURIDAD: Prevenir path traversal fuera de src/
     if (!absolutePath.startsWith(this.srcPath)) {
-      throw new Error(`SECURITY VIOlATION: Cannot read files outside of the src/ directory.`);
+      throw new Error(`SECURITY VIOLATION: Cannot read files outside of the src/ directory.`);
     }
 
     if (!fs.existsSync(absolutePath)) {

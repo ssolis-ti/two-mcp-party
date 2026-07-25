@@ -14,6 +14,10 @@ export class MessagingService {
       throw new Error('from and content are required');
     }
 
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('content must be a non-empty string');
+    }
+
     try {
       // Validar sesión activa del agente
       const agent = this.db.prepare('SELECT current_session_id FROM agents WHERE name = ?').get(from);

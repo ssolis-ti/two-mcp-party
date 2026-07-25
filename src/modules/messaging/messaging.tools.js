@@ -27,13 +27,13 @@ export function getMessagingTools(service) {
       schema: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: 'Your agent name' },
+          agent_name: { type: 'string', description: 'Your agent name' },
           limit: { type: 'number', description: 'Max number of messages to retrieve', default: 50 }
         },
-        required: ['name']
+        required: ['agent_name']
       },
       handler: async (args, engine) => {
-        return service.getMessages(args.name, args.limit);
+        return service.getMessages(args.agent_name, args.limit);
       }
     }
   ];

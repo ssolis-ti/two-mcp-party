@@ -60,7 +60,8 @@ export class SessionsService {
       const stmt = this.db.prepare(
         "UPDATE agents SET current_session_id = ?, last_seen = datetime('now') WHERE name = ?"
       );
-      stmt.run(sessionId, agentName);
+      const result = stmt.run(sessionId, agentName);
+      if (result.changes === 0) throw new Error(`Agent '${agentName}' not found. Register first with bridge_register.`);
       return { success: true, message: `Agent ${agentName} joined session ${sessionId}` };
     } catch (error) {
       logger.error({ error, agentName, sessionId }, 'Error joining session');
@@ -74,7 +75,8 @@ export class SessionsService {
       const stmt = this.db.prepare(
         "UPDATE agents SET current_session_id = NULL, last_seen = datetime('now') WHERE name = ?"
       );
-      stmt.run(agentName);
+      const result = stmt.run(agentName);
+      if (result.changes === 0) throw new Error(`Agent '${agentName}' not found. Register first with bridge_register.`);
       return { success: true, agent: agentName, session_id: null };
     } catch (error) {
       logger.error({ error, agentName }, 'Error leaving session');
