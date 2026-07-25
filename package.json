@@ -1,6 +1,6 @@
 {
   "name": "two-mcp-party",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "AgentBridge: P2P MCP Hub for Multi-Agent Telecom",
   "type": "module",
   "main": "src/index.js",
