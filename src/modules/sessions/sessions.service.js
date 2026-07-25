@@ -38,18 +38,29 @@ export class SessionsService {
     if (session.status !== 'active') throw new Error('Cannot join an archived session');
 
     // Actualizar current_session_id del agente
-    const stmt = this.db.prepare('UPDATE agents SET current_session_id = ?, last_seen = datetime("now") WHERE name = ?');
-    stmt.run(sessionId, agentName);
-    
-    logger.debug({ agentName, sessionId }, 'Agent joined session');
-    return { success: true, agent: agentName, session_id: sessionId };
+    try {
+      const stmt = this.db.prepare(
+        "UPDATE agents SET current_session_id = ?, last_seen = datetime('now') WHERE name = ?"
+      );
+      stmt.run(sessionId, agentName);
+      return { success: true, message: `Agent ${agentName} joined session ${sessionId}` };
+    } catch (error) {
+      this.logger.error({ error, agentName, sessionId }, 'Error joining session');
+      throw error;
+    }
   }
 
   leaveSession(agentName) {
-    if (!agentName) throw new Error('Agent name required');
-    const stmt = this.db.prepare('UPDATE agents SET current_session_id = NULL, last_seen = datetime("now") WHERE name = ?');
-    stmt.run(agentName);
-    return { success: true, agent: agentName, session_id: null };
+    try {
+      const stmt = this.db.prepare(
+        "UPDATE agents SET current_session_id = NULL, last_seen = datetime('now') WHERE name = ?"
+      );
+      stmt.run(agentName);
+      return { success: true, agent: agentName, session_id: null };
+    } catch (error) {
+      this.logger.error({ error, agentName }, 'Error leaving session');
+      throw error;
+    }
   }
 
   listSessions() {
