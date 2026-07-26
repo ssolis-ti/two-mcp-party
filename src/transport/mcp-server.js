@@ -141,21 +141,34 @@ export class MCPServerTransport {
     const transportSessions = new Map();
 
     // === PUSH NOTIFICATIONS (SSE) ===
-    const sseClients = new Set();
+    const sseClients = new Map(); // Store Map of res -> agentName
     app.get('/api/events', (req, res) => {
+      const agentName = req.query.agent || 'unknown';
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive'
       });
-      res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
-      sseClients.add(res);
+      res.write(`data: ${JSON.stringify({ type: 'connected', agent: agentName })}\n\n`);
+      sseClients.set(res, agentName);
       req.on('close', () => sseClients.delete(res));
     });
 
     this.engine.eventBus.on('message:new', (msg) => {
       const payload = JSON.stringify({ type: 'message', data: msg });
-      sseClients.forEach(client => client.write(`data: ${payload}\n\n`));
+      
+      try {
+        const sessionAgents = this.engine.db.prepare('SELECT name FROM agents WHERE current_session_id = ?').all(msg.session_id).map(r => r.name);
+        sseClients.forEach((agentName, client) => {
+          // Broadcast to unknown clients (legacy), OR to clients in the session EXCEPT the sender
+          if (agentName === 'unknown' || (sessionAgents.includes(agentName) && agentName !== msg.from)) {
+            client.write(`data: ${payload}\n\n`);
+          }
+        });
+      } catch (err) {
+        // Fallback blind broadcast if something fails
+        sseClients.forEach((_, client) => client.write(`data: ${payload}\n\n`));
+      }
     });
     // ================================
 
@@ -202,16 +215,32 @@ export class MCPServerTransport {
       res.status(404).send('Session not found');
     };
 
-    // Cleanup de sesiones inactivas (cada 5 min)
+    // DPD Proactivo (cada 30s)
+    setInterval(() => {
+      try {
+        const activeSessions = this.engine.db.prepare('SELECT id, current_turn FROM sessions WHERE status = "active" AND current_turn IS NOT NULL').all();
+        for (const session of activeSessions) {
+          const owner = this.engine.db.prepare('SELECT status FROM agents WHERE name = ?').get(session.current_turn);
+          if (!owner || owner.status === 'offline') {
+            logger.info({ sessionId: session.id, agent: session.current_turn }, 'Proactive DPD: Reclaiming token from offline agent');
+            this.engine.db.prepare('UPDATE sessions SET current_turn = NULL WHERE id = ?').run(session.id);
+          }
+        }
+      } catch (e) {
+        logger.error({ err: e.message }, 'Proactive DPD failed');
+      }
+    }, 30000);
+
+    // Cleanup de sesiones inactivas de transporte HTTP (cada 2 min)
     setInterval(() => {
       const now = Date.now();
       for (const [id, transport] of transportSessions) {
-        if (transport.sessionId && (now - (transport._lastActivity || now)) > 300000) {
-          logger.info({ sessionId: id }, 'Removing inactive session');
+        if (transport.sessionId && (now - (transport._lastActivity || now)) > 120000) {
+          logger.info({ sessionId: id }, 'Removing inactive HTTP transport session');
           transportSessions.delete(id);
         }
       }
-    }, 300000);
+    }, 120000);
 
     app.get('/sse', route);
     app.post('/sse', route);
