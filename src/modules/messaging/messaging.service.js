@@ -64,8 +64,9 @@ export class MessagingService {
       }
 
       // 2. Autopilot: verificar límite de turnos (Bypass si es critical)
+      let config = {};
       if (priority !== 'critical' && session.mode === 'autopilot') {
-        const config = session.mode_config ? JSON.parse(session.mode_config) : {};
+        config = session.mode_config ? JSON.parse(session.mode_config) : {};
         const maxTurns = config.max_turns || 10;
 
         if (session.turn_count >= maxTurns) {
@@ -77,9 +78,12 @@ export class MessagingService {
             `Autopilot limit reached (${maxTurns} turns). Session auto-paused. Use bridge_resume_session to continue or create a new session.`
           );
         }
+      }
 
-        // 3. Autopilot: verificar cooldown (Bypass si es critical)
-        const cooldownSeconds = config.cooldown_seconds || 30;
+      // 3. Universal Cooldown (Bypass si es critical)
+      if (priority !== 'critical') {
+        // En modo autopilot el cooldown puede ser mayor (ej: 30s). En otros modos (free, moderator), 3s minimo anti-spam.
+        const cooldownSeconds = (session.mode === 'autopilot' && config.cooldown_seconds) ? config.cooldown_seconds : 3;
         const lastMsg = this.db.prepare(
           'SELECT created_at FROM messages WHERE session_id = ? AND from_agent = ? ORDER BY created_at DESC LIMIT 1'
         ).get(sessionId, from);
@@ -90,7 +94,7 @@ export class MessagingService {
           if (elapsed < cooldownSeconds) {
             const wait = Math.ceil(cooldownSeconds - elapsed);
             throw new Error(
-              `Cooldown active for ${from}. Wait ${wait} more second(s) before sending again.`
+              `Universal Cooldown active for ${from}. Wait ${wait} more second(s) before sending again.`
             );
           }
         }
