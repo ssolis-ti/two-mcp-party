@@ -4,7 +4,7 @@ import { generateId } from '../../utils/id.js';
 const VALID_MODES = ['autopilot', 'moderator', 'free'];
 
 const MODE_DEFAULTS = {
-  autopilot: { max_turns: 10, cooldown_seconds: 30 },
+  autopilot: { max_turns: 30, cooldown_seconds: 30 },
   moderator: {},
   free: { goals: [], current_goal_index: 0 }
 };
@@ -123,7 +123,7 @@ export class SessionsService {
 
     // Info adicional por modo
     if (session.mode === 'autopilot') {
-      result.turns_remaining = Math.max(0, (config.max_turns || 10) - session.turn_count);
+      result.turns_remaining = Math.max(0, (config.max_turns || 30) - session.turn_count);
     }
 
     if (session.mode === 'free' && config.goals && config.goals.length > 0) {
