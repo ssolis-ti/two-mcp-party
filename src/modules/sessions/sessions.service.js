@@ -52,7 +52,7 @@ export class SessionsService {
   joinSession(agentName, sessionId) {
     if (!agentName || !sessionId) throw new Error('Agent name and Session ID required');
 
-    const session = this.db.prepare('SELECT status FROM sessions WHERE id = ?').get(sessionId);
+    const session = this.db.prepare('SELECT status, name, mode, turn_count, mode_config FROM sessions WHERE id = ?').get(sessionId);
     if (!session) throw new Error('Session not found');
     if (session.status === 'archived') throw new Error('Cannot join an archived session');
 
@@ -62,6 +62,22 @@ export class SessionsService {
       );
       const result = stmt.run(sessionId, agentName);
       if (result.changes === 0) throw new Error(`Agent '${agentName}' not found. Register first with bridge_register.`);
+
+      // Handshake V2
+      const participants = this.db.prepare('SELECT name, type FROM agents WHERE current_session_id = ?').all(sessionId);
+      if (participants.length >= 2) {
+        const config = session.mode_config ? JSON.parse(session.mode_config) : {};
+        const maxTurns = config.max_turns || '∞';
+        const msgContent = `## 🤝 Sesión: ${session.name}\n**Participantes:** ${participants.map(p => `@${p.name} (${p.type})`).join(', ')}\n**Modo:** ${session.mode}\n**Turnos usados:** ${session.turn_count}/${maxTurns}\n\n_Handshake completado automáticamente_`;
+        
+        this.db.prepare(`
+          INSERT INTO messages (id, session_id, from_agent, content, type, priority, metadata, seq, created_at)
+          VALUES (?, ?, 'SYSTEM', ?, 'system', 'high', '{}', (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE session_id = ?), datetime('now'))
+        `).run(generateId('msg'), sessionId, msgContent, sessionId);
+        
+        this.eventBus.emit('message:new', { session_id: sessionId });
+      }
+
       return { success: true, message: `Agent ${agentName} joined session ${sessionId}` };
     } catch (error) {
       logger.error({ error, agentName, sessionId }, 'Error joining session');

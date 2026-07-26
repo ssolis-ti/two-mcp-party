@@ -2,9 +2,10 @@ import { logger } from '../../core/logger.js';
 import { generateId } from '../../utils/id.js';
 
 export class MessagingService {
-  constructor(db, eventBus) {
+  constructor(db, eventBus, loopService) {
     this.db = db;
     this.eventBus = eventBus;
+    this.loopService = loopService;
   }
 
   sendMessage(payload) {
@@ -101,13 +102,9 @@ export class MessagingService {
       }
 
       // === ANTI-LOOPING (No-Progress Detection) ===
-      const lastMessages = this.db.prepare(
-        'SELECT content FROM messages WHERE session_id = ? AND from_agent = ? ORDER BY rowid DESC LIMIT 3'
-      ).all(sessionId, from);
-      
       let isLooping = false;
-      if (lastMessages.length === 3) {
-        isLooping = lastMessages.every(msg => msg.content === content);
+      if (this.loopService) {
+        isLooping = this.loopService.checkAntiLoop(sessionId, from, content);
       }
 
       // === INSERT MESSAGE ===
@@ -122,12 +119,11 @@ export class MessagingService {
 
       if (isLooping) {
         const sysMsgId = generateId('msg');
-        const sysContent = "Anti-Looping Protection: Se han detectado llamadas idénticas repetidas sin progreso aparente. Por favor, cambia tu estrategia, usa otras herramientas, o detente si estás atascado.";
+        const sysContent = "Anti-Looping Protection: Se han detectado llamadas repetidas sin progreso aparente. Por favor, cambia tu estrategia, usa otras herramientas, o detente si estás atascado.";
         stmt.run(sysMsgId, sessionId, 'SYSTEM', sysContent, 'message', '{}', 'critical');
         this.eventBus.emit('message:new', { id: sysMsgId, session_id: sessionId, from: 'SYSTEM', content: sysContent, type: 'message', metadata: {}, priority: 'critical', created_at: new Date().toISOString() });
         logger.warn({ session_id: sessionId, agent: from }, 'Loop detected and intercepted');
       }
-
 
       // Procesar yield_to y actualizar sesión
       let nextTurn = session.current_turn;

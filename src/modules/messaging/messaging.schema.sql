@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS messages (
   content     TEXT NOT NULL,
   type        TEXT DEFAULT 'message',
   metadata    TEXT,
+  priority    TEXT DEFAULT 'normal',
+  seq         INTEGER,
   created_at  TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (from_agent) REFERENCES agents(name),
   FOREIGN KEY (session_id) REFERENCES sessions(id)
