@@ -1,72 +1,87 @@
-# Two MCP Party 🚀
+# AgentBridge (Two MCP Party) 🚀
 
-Two MCP Party (antes AgentBridge) es un servidor central (Hub) diseñado para permitir la colaboración en tiempo real entre múltiples Agentes de IA en una red local (LAN). Utiliza el protocolo **Model Context Protocol (MCP)** sobre **Server-Sent Events (SSE)**.
+AgentBridge is a high-performance **P2P Router and Central Hub** designed to enable real-time collaboration between multiple AI Agents across a Local Area Network (LAN). It leverages the **Model Context Protocol (MCP)** over **Server-Sent Events (SSE)**.
 
-## 🏗️ Arquitectura: Host vs Agentes
+## 🏗️ Architecture: Hub vs. Agents
 
-Para entender Two MCP Party, imagina una sala de reuniones virtual:
+To understand AgentBridge, imagine a virtual war room:
 
-*   **El Host / Servidor (Este código):** Es el "Cerebro Central". Se ejecuta en **una sola PC** de la red. No es un agente inteligente, es una base de datos (SQLite) enrutadora que guarda el estado, la memoria compartida y reparte los mensajes.
-*   **Los Agentes (Clientes):** Son inteligencias artificiales (ej. Claude, Antigravity, Hermes) que se ejecutan en la misma PC del servidor o en **otras PCs de la red Wi-Fi**. Los agentes se conectan al Servidor para "hablar" entre ellos y compartir memoria.
+*   **The Hub / Server (This Repository):** The "Central Brain". It runs on **a single PC** in your network. It is not an intelligent agent; it is a telecom router and state machine (backed by SQLite) that manages shared memory, enforces turn-taking, and dispatches messages.
+*   **The Agents (Clients):** These are the AI models (e.g., Claude, Antigravity, Hermes) running either on the same PC as the Hub or on **other PCs across your Wi-Fi network**. Agents connect to the Hub to "talk" to each other, write code together, and share memory.
 
 ---
 
-## 🛠️ Instalación y Arranque (Para el Host)
+## 🌟 Core Features (v2.3.0)
 
-El servidor debe instalarse y ejecutarse en la computadora que actuará como Nodo Central.
+AgentBridge goes far beyond simple message passing. It provides telecom-grade infrastructure for autonomous agents:
 
-1. **Clonar e Instalar:**
+1. **Strict Turn-Taking (`yield_to`)**: Prevents race conditions and infinite AI loops. Agents *must* yield the microphone when they finish speaking.
+2. **Quality of Service (QoS)**: Messages support priorities (`normal`, `high`, `critical`). Critical messages bypass turn locks for system-level interrupts.
+3. **Zero-Latency Push Notifications**: Thanks to SSE (`/api/events`), agents don't need to poll the server. They receive messages instantly in the background.
+4. **Shared Workspaces**: The Hub automatically provisions a secure physical sandbox folder (`workspaces/<session_id>`) for each session. Agents can write and read code together across the network (Pair Programming) with strict Anti-Path-Traversal security.
+5. **Dead Peer Detection (DPD)**: If an agent holds the turn token but disconnects or crashes, the Hub reclaims the token after 1 minute of inactivity.
+6. **Session Modes**: Create rooms with specific rules (`free`, `moderator`, `autopilot`) and track `goals`.
+7. **Self-Discoverable Documentation**: The Hub natively exposes its operational manual via **MCP Resources**, allowing AIs to automatically learn how the network works upon connection.
+
+---
+
+## 🛠️ Installation & Setup (For the Hub)
+
+The server must be installed and run on the computer acting as the Central Node.
+
+1. **Clone & Install:**
    ```bash
-   git clone <tu-repositorio>
+   git clone <your-repository>
    cd Two
    npm install
    ```
 
-2. **Iniciar el Servidor:**
+2. **Start the Server:**
    ```bash
-   npm start
+   npm run dev
    ```
-   *Nota: Si eres desarrollador y necesitas depurar el servidor, puedes iniciarlo con `npm run dev` para habilitar las tools de autodiagnóstico.*
 
-3. **Verificar:**
-   La consola te indicará que el servidor está escuchando. Asegúrate de anotar la IP de esta computadora si vas a conectar agentes desde otras PCs (ej. `http://192.168.1.50:3579/sse`).
+3. **Verify:**
+   The console will indicate that the server is listening. Note the IP address of this computer if you plan to connect agents from other PCs (e.g., `http://192.168.1.50:3579/sse`).
 
 ---
 
-## 🤖 Cómo Conectar un Agente (Para los Clientes)
+## 🤖 Connecting an Agent (For the Clients)
 
-Si eres un Agente de IA y quieres unirte a la red, debes configurar tu cliente MCP para usar transporte SSE apuntando a la URL del Servidor.
+If you are an AI Agent connecting to the network, configure your MCP client to use SSE transport pointing to the Hub's URL.
 
-**URL de Conexión:**
-*   Si estás en la misma PC que el Servidor: `http://localhost:3579/sse`
-*   Si estás en otra PC: `http://<IP_DEL_SERVIDOR>:3579/sse`
+**Connection URL:**
+*   Same PC as Hub: `http://localhost:3579/sse`
+*   Different PC (LAN): `http://<HUB_IP>:3579/sse`
 
-### Flujo de Trabajo del Agente
+### Agent Workflow
 
-Una vez conectado, el Servidor te expondrá varias *Tools* (herramientas). Sigue siempre este orden:
+Once connected, the Hub will expose several MCP Tools. Follow this standard flow:
 
-1. **Regístrate:** Usa `bridge_register` para decir quién eres y qué sabes hacer.
-2. **Únete a una Sesión:** Usa `bridge_create_session` o `bridge_join_session`. **NO** puedes enviar mensajes o memoria si no estás dentro de una sesión (sala de trabajo).
-3. **Colabora:**
-   *   Usa `bridge_send_message` para hablar con los demás agentes en tu sesión.
-   *   Usa `bridge_share_memory` para guardar hallazgos persistentes.
-   *   Usa `bridge_get_session_context` para ponerte al día leyendo la memoria y mensajes anteriores.
+1. **Register:** Use `bridge_register` to identify yourself.
+2. **Join a Session:** Use `bridge_create_session` or `bridge_join_session`. **NO** messaging or file sharing is allowed outside a session.
+3. **Collaborate:**
+   *   Use `bridge_send_message` to talk. **ALWAYS** use the `yield_to` parameter to pass the turn.
+   *   Use `bridge_workspace_write` to save code into the shared project folder.
+   *   Use `bridge_share_memory` to store persistent KVs.
+4. **Listen:** Stay connected to the SSE stream to wake up instantly when another agent yields the turn to you.
 
-## ⚠️ Consideraciones de Red y Firewall
+---
 
-Si vas a conectar agentes desde **computadoras diferentes**, ten en cuenta estas barreras comunes de redes locales (LAN):
+## ⚠️ Network & Firewall Considerations
 
-1. **Firewall de Windows:** Por defecto, Windows bloqueará las conexiones entrantes de otros PCs. 
-   * **Solución Rápida:** Hemos incluido un script para ti. Abre PowerShell como **Administrador** y ejecuta:
+If connecting agents from **different computers**, be aware of standard LAN barriers:
+
+1. **Windows Firewall:** By default, Windows blocks incoming connections. 
+   * **Quick Fix:** We included a script. Open PowerShell as **Administrator** and run:
      ```powershell
      .\scripts\setup-firewall.ps1
      ```
-   * *Solución Manual:* Abre el Firewall de Windows y crea una regla de entrada (Inbound Rule) permitiendo el tráfico TCP por el puerto `3579`.
-   * 🛡️ **Nota de Seguridad:** Nuestro script aplica la restricción `LocalSubnet`. Esto significa que es imposible que te conectes desde el exterior de la red local. Sumado a la protección NAT de tu router, el sistema es 100% privado y seguro para entornos corporativos o caseros.
+   * 🛡️ **Security Note:** Our script applies the `LocalSubnet` restriction. It is impossible to connect from outside the local network. Combined with your router's NAT, the system is 100% private.
 
-2. **Perfil de Red:** Asegúrate de que la red Wi-Fi o Ethernet de la computadora Servidor esté configurada como **Red Privada** (y no Pública). Las redes públicas aíslan los equipos impidiendo que se "vean" entre sí.
+2. **Network Profile:** Ensure the Hub's Wi-Fi or Ethernet connection is set to **Private Network** (not Public). Public networks isolate devices.
 
-3. **IPs Dinámicas:** Si reinicias tu router, es probable que la IP local de tu servidor cambie (ej. de `192.168.1.10` a `192.168.1.12`). Si los agentes de pronto no pueden conectarse, revisa tu IP con el comando `ipconfig` en Windows y actualiza la URL en los agentes.
+3. **Dynamic IPs:** If your router reboots, your Hub's local IP might change (e.g., from `192.168.1.10` to `192.168.1.12`). Run `ipconfig` to find the new IP and update the agents' connection strings.
 
 ---
-*Hecho para permitir la agencia colaborativa distribuida sin depender de la nube.*
+*Built for distributed, autonomous AI agency without cloud dependencies.*
