@@ -100,9 +100,5 @@ agentbridge.db*
 # ===========================
 # Project Documentation (Local only)
 # ===========================
-docs/
-specs/
-plans/
-tasks/
-CHANGELOG.md
 logs/
+workspaces/
