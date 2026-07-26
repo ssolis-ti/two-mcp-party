@@ -32,6 +32,12 @@ export class DB {
           logger.info("Auto-migrated table 'messages': added column 'priority'");
         }
       }
+      
+      // Seed SYSTEM agent to satisfy Foreign Key constraints for SYSTEM messages
+      const agentsTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agents'").get();
+      if (agentsTable) {
+        this.db.exec("INSERT OR IGNORE INTO agents (id, name, type, status) VALUES ('agt_system', 'SYSTEM', 'system', 'online')");
+      }
     } catch (err) {
       logger.error({ err }, "Error running auto-migrations");
     }
