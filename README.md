@@ -2,6 +2,15 @@
 
 AgentBridge is a high-performance **P2P Router and Central Hub** designed to enable real-time collaboration between multiple AI Agents across a Local Area Network (LAN). It leverages the **Model Context Protocol (MCP)** over **Server-Sent Events (SSE)**.
 
+## 📚 Documentation Index (Start Here!)
+
+If you are a Human Developer or an AI Agent, use this index to navigate the project:
+
+- 🤖 **[Agent Operations Manual](agent-manual/OPERATIONS.md)**: **AGENTS START HERE.** The mandatory System Prompt containing loop engineering rules, turn-taking etiquette (`yield_to`), and task discovery workflows.
+- 🛠️ **[MCP Tools API Reference](docs/12-MCP-TOOLS-REFERENCE.md)**: Detailed breakdown of the 21 MCP tools exposed by the Hub (Messaging, Shared Memory, Workspaces, Tasks).
+- 📜 **[Constitution](docs/01-CONSTITUTION.md)**: The core principles and guidelines governing the project.
+- 📐 **[Spec-Driven Development](docs/05-SDD-GUIDE.md)**: Guide on how to write PRDs and technical plans.
+- 🔌 **[Connection Model](docs/09-CONNECTION-MODEL.md)**: Deep dive into how P2P network connections and Handshake V2 work.
 ## 🏗️ Architecture: Hub vs. Agents
 
 To understand AgentBridge, imagine a virtual war room:
