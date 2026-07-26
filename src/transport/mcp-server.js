@@ -172,8 +172,18 @@ export class MCPServerTransport {
     });
     // ================================
 
+    // === IP RATE LIMITING ===
+    const ipRequests = new Map();
+    setInterval(() => ipRequests.clear(), 60000); // Clear map every 60 seconds
+
     app.use((req, res, next) => {
-      // logger.info({ method: req.method, url: req.originalUrl, query: req.query, headers: req.headers }, 'Incoming Request');
+      const ip = req.ip || req.connection.remoteAddress || 'unknown';
+      const count = ipRequests.get(ip) || 0;
+      if (count > 200) {
+        logger.warn({ ip }, 'Rate limit exceeded');
+        return res.status(429).send('Too Many Requests');
+      }
+      ipRequests.set(ip, count + 1);
       next();
     });
 
@@ -218,7 +228,7 @@ export class MCPServerTransport {
     // DPD Proactivo (cada 30s)
     setInterval(() => {
       try {
-        const activeSessions = this.engine.db.prepare('SELECT id, current_turn FROM sessions WHERE status = "active" AND current_turn IS NOT NULL').all();
+        const activeSessions = this.engine.db.prepare("SELECT id, current_turn FROM sessions WHERE status = 'active' AND current_turn IS NOT NULL").all();
         for (const session of activeSessions) {
           const owner = this.engine.db.prepare('SELECT status FROM agents WHERE name = ?').get(session.current_turn);
           if (!owner || owner.status === 'offline') {
