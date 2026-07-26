@@ -23,6 +23,7 @@ export class WorkspacesService {
    */
   async initWorkspace(sessionId) {
     if (!sessionId) throw new Error('sessionId is required');
+    if (/[\/\\]|\.\./.test(sessionId)) throw new Error('Security Error: Invalid sessionId format');
     
     try {
       await fs.mkdir(this.workspacesRoot, { recursive: true });
@@ -42,6 +43,7 @@ export class WorkspacesService {
    */
   getSafePath(sessionId, requestedPath) {
     if (!sessionId || !requestedPath) throw new Error('sessionId and requestedPath are required');
+    if (/[\/\\]|\.\./.test(sessionId)) throw new Error('Security Error: Invalid sessionId format');
 
     const sessionRoot = path.join(this.workspacesRoot, sessionId);
     
