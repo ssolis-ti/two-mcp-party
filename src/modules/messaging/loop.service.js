@@ -7,7 +7,7 @@ export class LoopService {
     // Map<sessionId, Map<agentId, ToolCall[]>>
     this.toolHistory = new Map();
     // Limpieza periódica del Map (cada 5 minutos)
-    setInterval(() => this._cleanup(), 5 * 60 * 1000);
+    setInterval(() => this._cleanup(), 5 * 60 * 1000).unref();
   }
 
   /**

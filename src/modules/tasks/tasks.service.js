@@ -21,13 +21,22 @@ export class TasksService {
       const task = { id: taskId, session_id: sessionId, publisher: agentName, description, status: 'open' };
       logger.info({ taskId, publisher: agentName }, 'Task published');
       
+      const sysMsgId = generateId('msg');
+      const sysContent = `New Task Published: [${taskId}] ${description}`;
+      const metadataStr = JSON.stringify({ task_id: taskId });
+
+      this.db.prepare(`
+        INSERT INTO messages (id, session_id, from_agent, content, type, metadata, priority)
+        VALUES (?, ?, 'SYSTEM', ?, 'system', ?, 'high')
+      `).run(sysMsgId, sessionId, sysContent, metadataStr);
+
       this.eventBus.emit('message:new', {
-        id: generateId('msg'),
+        id: sysMsgId,
         session_id: sessionId,
         from: 'SYSTEM',
-        content: `New Task Published: [${taskId}] ${description}`,
-        type: 'message',
-        metadata: JSON.stringify({ task_id: taskId }),
+        content: sysContent,
+        type: 'system',
+        metadata: metadataStr,
         priority: 'high',
         created_at: new Date().toISOString()
       });
@@ -63,13 +72,22 @@ export class TasksService {
 
       logger.info({ taskId, claimant: agentName }, 'Task claimed');
       
+      const sysMsgId = generateId('msg');
+      const sysContent = `Task [${taskId}] claimed by ${agentName}`;
+      const metadataStr = JSON.stringify({ task_id: taskId, claimant: agentName });
+
+      this.db.prepare(`
+        INSERT INTO messages (id, session_id, from_agent, content, type, metadata, priority)
+        VALUES (?, ?, 'SYSTEM', ?, 'system', ?, 'normal')
+      `).run(sysMsgId, task.session_id, sysContent, metadataStr);
+
       this.eventBus.emit('message:new', {
-        id: generateId('msg'),
+        id: sysMsgId,
         session_id: task.session_id,
         from: 'SYSTEM',
-        content: `Task [${taskId}] claimed by ${agentName}`,
-        type: 'message',
-        metadata: JSON.stringify({ task_id: taskId, claimant: agentName }),
+        content: sysContent,
+        type: 'system',
+        metadata: metadataStr,
         priority: 'normal',
         created_at: new Date().toISOString()
       });
