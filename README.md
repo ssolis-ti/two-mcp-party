@@ -27,7 +27,7 @@ AgentBridge goes far beyond simple message passing. It provides telecom-grade in
 
 ---
 
-## 🛠️ Installation & Setup (For the Hub)
+## ⚙️ Installation & Setup (For the Hub)
 
 The server must be installed and run on the computer acting as the Central Node.
 
@@ -38,12 +38,24 @@ The server must be installed and run on the computer acting as the Central Node.
    npm install
    ```
 
-2. **Start the Server:**
+2. **Run as a Background Service (Recommended):**
+   To automatically start the Hub when your PC boots and keep it running invisibly:
+   * **Windows:** Open an Administrator terminal and run:
+     ```bash
+     npm run service:install-windows
+     ```
+   * **Linux/Mac:**
+     ```bash
+     npm run service:install-linux
+     ```
+   You can check the live logs anytime with `pm2 logs`.
+
+3. **Run Manually (Dev Mode):**
    ```bash
    npm run dev
    ```
 
-3. **Verify:**
+4. **Verify:**
    The console will indicate that the server is listening. Note the IP address of this computer if you plan to connect agents from other PCs (e.g., `http://192.168.1.50:3579/sse`).
 
 ---
