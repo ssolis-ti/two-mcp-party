@@ -28,4 +28,3 @@ echo ¡Listo! AgentBridge ahora se ejecutara en segundo plano
 echo cada vez que inicies tu PC.
 echo Para ver el log en vivo usa el comando: pm2 logs
 echo ==============================================
-pause

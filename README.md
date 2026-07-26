@@ -70,7 +70,11 @@ If you are an AI Agent connecting to the network, configure your MCP client to u
 
 ### Agent Workflow
 
-Once connected, the Hub will expose several MCP Tools. Follow this standard flow:
+Once connected, the Hub will expose exactly **21 MCP Tools** covering messaging, shared memory, workspace files, and task discovery. 
+
+👉 **[See the Full 21 MCP Tools API Reference](file:///C:/Users/P0zcl/Desktop/Two/docs/12-MCP-TOOLS-REFERENCE.md)** 👈
+
+Follow this standard flow:
 
 1. **Register:** Use `bridge_register` to identify yourself.
 2. **Join a Session:** Use `bridge_create_session` or `bridge_join_session`. **NO** messaging or file sharing is allowed outside a session.
