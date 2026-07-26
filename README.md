@@ -11,17 +11,19 @@ To understand AgentBridge, imagine a virtual war room:
 
 ---
 
-## 🌟 Core Features (v2.3.0)
+## 🌟 Core Features (v2.6.1)
 
-AgentBridge goes far beyond simple message passing. It provides telecom-grade infrastructure for autonomous agents:
+AgentBridge goes far beyond simple message passing. It provides telecom-grade infrastructure for autonomous agents, implementing advanced Loop Engineering concepts:
 
-1. **Strict Turn-Taking (`yield_to`)**: Prevents race conditions and infinite AI loops. Agents *must* yield the microphone when they finish speaking.
-2. **Quality of Service (QoS)**: Messages support priorities (`normal`, `high`, `critical`). Critical messages bypass turn locks for system-level interrupts.
-3. **Zero-Latency Push Notifications**: Thanks to SSE (`/api/events`), agents don't need to poll the server. They receive messages instantly in the background.
-4. **Shared Workspaces**: The Hub automatically provisions a secure physical sandbox folder (`workspaces/<session_id>`) for each session. Agents can write and read code together across the network (Pair Programming) with strict Anti-Path-Traversal security.
-5. **Dead Peer Detection (DPD)**: If an agent holds the turn token but disconnects or crashes, the Hub reclaims the token after 1 minute of inactivity.
-6. **Session Modes**: Create rooms with specific rules (`free`, `moderator`, `autopilot`) and track `goals`.
-7. **Self-Discoverable Documentation**: The Hub natively exposes its operational manual via **MCP Resources**, allowing AIs to automatically learn how the network works upon connection.
+1. **Handshake V2 & Auto-Discovery**: When joining a session, the Hub automatically injects a `SYSTEM` message providing context about participants, rules, and turn status, enabling immediate situational awareness.
+2. **Task Discovery System**: Agents can dynamically orchestrate work using `bridge_publish_task`, `bridge_list_tasks`, and `bridge_claim_task`, allowing decentralized work distribution.
+3. **Intelligent Anti-Looping**: The Hub actively monitors agent behavior. It prevents "No-Progress" deadlocks by blocking agents that repeat the same tool calls or identical messages consecutively, forcing them to yield or change strategy.
+4. **Strict Turn-Taking (`yield_to`)**: Prevents race conditions. Agents *must* yield the microphone when they finish speaking.
+5. **Quality of Service (QoS)**: Messages support priorities (`normal`, `high`, `critical`). Critical messages bypass turn locks for system-level interrupts.
+6. **Zero-Latency Push Notifications**: Thanks to SSE (`/api/events`), agents receive messages instantly in the background without polling.
+7. **Shared Workspaces**: Secure physical sandbox folders (`workspaces/<session_id>`) with strict Path-Traversal security for remote Pair Programming.
+8. **Dead Peer Detection (DPD)**: Reclaims turn tokens if an agent disconnects or crashes while holding the turn.
+9. **Spec-Driven Development (SDD) Ready**: Designed to work flawlessly with SDD workflows (Specs, Plans, Tasks) in shared workspaces.
 
 ---
 
@@ -63,7 +65,7 @@ Once connected, the Hub will expose several MCP Tools. Follow this standard flow
 3. **Collaborate:**
    *   Use `bridge_send_message` to talk. **ALWAYS** use the `yield_to` parameter to pass the turn.
    *   Use `bridge_workspace_write` to save code into the shared project folder.
-   *   Use `bridge_share_memory` to store persistent KVs.
+   *   Use `bridge_publish_task` and `bridge_claim_task` to assign work.
 4. **Listen:** Stay connected to the SSE stream to wake up instantly when another agent yields the turn to you.
 
 ---
