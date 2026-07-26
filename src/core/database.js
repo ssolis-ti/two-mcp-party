@@ -10,8 +10,31 @@ export class DB {
     // Configuración para máxima concurrencia y performance en SQLite
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
+    this.db.pragma('foreign_keys = ON');
+
+    this._runAutoMigrations();
     
-    logger.info(`Database initialized at ${dbPath} (WAL mode)`);
+    logger.info(`Database initialized at ${dbPath} (WAL mode, Foreign Keys ON)`);
+  }
+
+  _runAutoMigrations() {
+    try {
+      // Auto-migrate messages table for missing columns
+      const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'").get();
+      if (tables) {
+        const columns = this.db.prepare("PRAGMA table_info(messages)").all().map(c => c.name);
+        if (!columns.includes('seq')) {
+          this.db.exec("ALTER TABLE messages ADD COLUMN seq INTEGER");
+          logger.info("Auto-migrated table 'messages': added column 'seq'");
+        }
+        if (!columns.includes('priority')) {
+          this.db.exec("ALTER TABLE messages ADD COLUMN priority TEXT DEFAULT 'normal'");
+          logger.info("Auto-migrated table 'messages': added column 'priority'");
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, "Error running auto-migrations");
+    }
   }
 
   // Ejecuta un archivo .sql completo (útil para schemas de módulos)

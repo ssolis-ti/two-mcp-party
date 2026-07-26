@@ -50,8 +50,9 @@ export class WorkspacesService {
     // Normalize resolving the requested path relative to the session root
     const absolutePath = path.resolve(sessionRoot, requestedPath);
 
-    // Security check: Must start with the session root folder
-    if (!absolutePath.startsWith(sessionRoot)) {
+    // Security check: Must be inside the session root folder
+    const relative = path.relative(sessionRoot, absolutePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
       logger.warn({ sessionId, requestedPath, absolutePath }, 'Path traversal attempt blocked');
       throw new Error(`Security Error: Access denied. Path ${requestedPath} is outside the session workspace.`);
     }
