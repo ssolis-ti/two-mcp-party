@@ -1,0 +1,44 @@
+import { HostedService } from './hosted.service.js';
+import { getHostedTools } from './hosted.tools.js';
+import { hostedConfig } from './hosted.config.js';
+import { MessagingService } from '../messaging/messaging.service.js';
+import { LoopService } from '../messaging/loop.service.js';
+import { SessionsService } from '../sessions/sessions.service.js';
+import { logger } from '../../core/logger.js';
+
+let serviceInstance;
+
+export default {
+  name: 'hosted',
+  version: '1.0.0',
+  description: 'LiteLLM-hosted model-agents that converse autonomously through the hub',
+  tools: [],
+
+  async onLoad(engine) {
+    // The hosted module drives turns through the same MessagingService /
+    // SessionsService machinery the external clients use. We share the
+    // singleton db + eventBus, so hosted turns integrate with turn-taking,
+    // DPD, anti-loop, cooldown and the message log exactly like any agent.
+    // (Instantiate fresh wrappers: they hold no per-instance state beyond the
+    // shared db, so this is safe and leaves the other modules untouched.)
+    const loopService = new LoopService(engine.db);
+    const messagingService = new MessagingService(engine.db, engine.eventBus, loopService);
+    const sessionsService = new SessionsService(engine.db, engine.eventBus);
+
+    serviceInstance = new HostedService(engine.db, engine.eventBus);
+    serviceInstance.initialize({ config: hostedConfig });
+    serviceInstance.setMessagingService(messagingService);
+    serviceInstance.setSessionsService(sessionsService);
+
+    const tools = getHostedTools(serviceInstance);
+    engine.registry.tools.push(...tools);
+
+    // Warn clearly if the LiteLLM key is still the placeholder.
+    if (!hostedConfig.liteLLM.apiKey || hostedConfig.liteLLM.apiKey.includes('<pon_aqui')) {
+      logger.warn('Hosted module: LITELLM_KEY points to a placeholder. Set LITELLM_KEY in hosted.config.js or the environment before running conversations.');
+    }
+
+    logger.info('Hosted module loaded (LiteLLM model-agents available). Models configured: ' +
+      hostedConfig.agents.map((a) => `${a.role}=${a.model}`).join(', '));
+  },
+};

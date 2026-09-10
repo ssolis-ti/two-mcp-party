@@ -98,3 +98,46 @@ Recupera memorias compartidas.
 - **Parámetros**:
   - `key` (string, opcional): Para buscar una llave específica.
   - `tags` (array de strings, opcional): Para buscar por etiqueta.
+
+---
+
+## 🐝 Mente Colmena (Swarm / Planificación multi-agente)
+
+El Hub integra una **mente colmena**: varias LLMs deliberan en paralelo (productor/revisor/crítico) y un sintetizador consolida el resultado en un plan estructurado. Los aportes individuales de cada modelo quedan **persistidos** y consultables, y los planes pueden **materializarse** como sesión de trabajo y **exportarse** a artefactos en disco.
+
+### `bridge_swarm_plan`
+Dispara la deliberación de la colmena y genera un plan de un objetivo.
+- **Parámetros**:
+  - `objective` (string, requerido): El objetivo que la colmena debe planear.
+  - `description` (string, opcional): Contexto o detalle adicional que los deliberadores consideran.
+- **Devuelve**: `plan_id` del plan creado (persistido en BD).
+- **Costo**: dispara 4 llamadas LLM (3 deliberadores + 1 sintetizador).
+
+### `bridge_swarm_skills`
+Lista el catálogo de capacidades/skills de la colmena (conocidas y propuestas como faltantes).
+
+### `bridge_swarm_contributions` *(nueva)*
+Consultar los **aportes individuales persistidos** de una deliberación. Cada modelo que deliberó deja su texto crudo (con su rol), que el sintetizador luego consolida.
+- **Parámetros**:
+  - `plan_id` (string, requerido): Identificador del plan del que se quieren los aportes.
+- **Devuelve**: array de `{ model, role, content, created_at }` — ej. `kimi-k3` (author), `glm-5.3` (reviewer), `grok-4.6` (critic).
+
+### `bridge_materialize_plan`
+Convierte un plan persistido en una **sesión de trabajo** del Hub, con las tareas publicadas como tickets y el orquestador asignado. Además **exporta el plan a artefactos** en `<proyecto>/workspace/<plan_id>/` (`plan.json` + hojas `tasks/<id>.md` por tarea, con deliverable, criterios de aceptación, dependencias y capabilities).
+- **Parámetros**:
+  - `plan_id` (string, requerido): Plan a materializar.
+  - `orchestrator_name` (string, opcional): Agente orquestador (por defecto `hermes-orchestrator`).
+- **Devuelve**: `session_id`, `tasks_materialized`, `artifacts` (rutas de los archivos exportados).
+
+### `bridge_materialize_status`
+Consulta el estado de una sesión materializada (tickets abiertos, agentes, memoria compartida).
+
+---
+
+## 🔁 Flujo de trabajo recomendado (mente colmena)
+
+1. **Planear**: `bridge_swarm_plan` genera el plan (4 LLM) y lo persiste.
+2. **Ver aportes**: `bridge_swarm_contributions` permite auditar qué dijo cada modelo (trazabilidad).
+3. **Materializar**: `bridge_materialize_plan` crea la sesión con las tareas como tickets y exporta los artefactos a `workspace/`.
+4. **Ejecutar**: el orquestador (p.ej. `hermes-orchestrator`) trabaja las tareas en la sesión; el progreso queda en la BD y en los artefactos.
+
