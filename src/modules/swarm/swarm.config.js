@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { hostedConfig } from '../hosted/hosted.config.js';
 
 /**
@@ -16,27 +15,11 @@ import { hostedConfig } from '../hosted/hosted.config.js';
  * LiteLLM en localhost:4000), de modo que NO se duplica configuración.
  */
 
-const LITELLM_KEY =
-  process.env.LITELLM_KEY ||
-  process.env.LITELLM_MASTER_KEY ||
-  (() => {
-    const candidates = [
-      'C:/Users/user/Desktop/deploys-docker/litellm-deploy/internal/litellm.env',
-    ];
-    for (const f of candidates) {
-      try {
-        const txt = readFileSync(f, 'utf8');
-        const m = txt.match(/^\s*LITELLM_MASTER_KEY\s*=\s*(.+)\s*$/m);
-        if (m && m[1]) return m[1].trim().replace(/^['"]|['"]$/g, '');
-      } catch (_) { /* continuar */ }
-    }
-    return hostedConfig.liteLLM.apiKey || '<pon_aqui_tu_key_master_real>';
-  })();
-
 export const swarmConfig = {
   liteLLM: {
     baseUrl: process.env.LITELLM_URL || hostedConfig.liteLLM.baseUrl || 'http://localhost:4000',
-    apiKey: LITELLM_KEY,
+    // Misma key que el modulo hosted: un unico punto de resolucion (ver hosted.config.js).
+    apiKey: hostedConfig.liteLLM.apiKey,
     timeoutMs: 240000,   // 240s, coherente con request_timeout del router
     maxTokens: 1200,     // deliberación de diseño (modelos aportan ~150 palabras)
     synthMaxTokens: 5000, // SINTETIZADOR necesita presupuesto para leer la deliberación

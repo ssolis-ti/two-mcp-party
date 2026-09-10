@@ -33,9 +33,11 @@ export default {
     const tools = getHostedTools(serviceInstance);
     engine.registry.tools.push(...tools);
 
-    // Warn clearly if the LiteLLM key is still the placeholder.
-    if (!hostedConfig.liteLLM.apiKey || hostedConfig.liteLLM.apiKey.includes('<pon_aqui')) {
-      logger.warn('Hosted module: LITELLM_KEY points to a placeholder. Set LITELLM_KEY in hosted.config.js or the environment before running conversations.');
+    if (!hostedConfig.liteLLM.apiKey) {
+      logger.warn(
+        'Hosted module: no LiteLLM key configured. Set LITELLM_KEY (or LITELLM_ENV_FILE ' +
+        'pointing at an env file with LITELLM_MASTER_KEY) before running conversations. See .env.example.'
+      );
     }
 
     logger.info('Hosted module loaded (LiteLLM model-agents available). Models configured: ' +

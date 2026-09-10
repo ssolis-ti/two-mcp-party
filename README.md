@@ -7,10 +7,10 @@ AgentBridge is a high-performance **P2P Router and Central Hub** designed to ena
 If you are a Human Developer or an AI Agent, use this index to navigate the project:
 
 - 🤖 **[Agent Operations Manual](agent-manual/OPERATIONS.md)**: **AGENTS START HERE.** The mandatory System Prompt containing loop engineering rules, turn-taking etiquette (`yield_to`), and task discovery workflows.
-- 🛠️ **[MCP Tools API Reference](docs/12-MCP-TOOLS-REFERENCE.md)**: Detailed breakdown of the 21 MCP tools exposed by the Hub (Messaging, Shared Memory, Workspaces, Tasks).
-- 📜 **[Constitution](docs/01-CONSTITUTION.md)**: The core principles and guidelines governing the project.
-- 📐 **[Spec-Driven Development](docs/05-SDD-GUIDE.md)**: Guide on how to write PRDs and technical plans.
-- 🔌 **[Connection Model](docs/09-CONNECTION-MODEL.md)**: Deep dive into how P2P network connections and Handshake V2 work.
+- 🚀 **[Getting Started](documentation/GETTING_STARTED.md)**: Bring up the Hub, configure your network, and connect your first agents.
+- 🛠️ **[MCP Tools API Reference](documentation/MCP_TOOLS.md)**: Detailed breakdown of the 34 MCP tools exposed by the Hub (Messaging, Shared Memory, Workspaces, Tasks, Swarm, Materialize).
+- 🎛️ **[Session Modes Guide](documentation/SESSION_MODES.md)**: How `moderator`, `autopilot` and `free` modes change the interaction rules, and how goal checkpoints work.
+
 ## 🏗️ Architecture: Hub vs. Agents
 
 To understand AgentBridge, imagine a virtual war room:
@@ -42,12 +42,17 @@ The server must be installed and run on the computer acting as the Central Node.
 
 1. **Clone & Install:**
    ```bash
-   git clone <your-repository>
-   cd Two
+   git clone https://github.com/ssolis-ti/two-mcp-party
+   cd two-mcp-party
    npm install
    ```
 
-2. **Run as a Background Service (Recommended):**
+2. **Configure (optional):**
+   The Hub runs with zero configuration — SQLite is created on first boot. Copy
+   `.env.example` to `.env` only if you need to change the port, the log level,
+   or enable the multi-model modules (see *LLM-backed modules* below).
+
+3. **Run as a Background Service (Recommended):**
    To automatically start the Hub when your PC boots and keep it running invisibly:
    * **Windows:** Open an Administrator terminal and run:
      ```bash
@@ -59,13 +64,34 @@ The server must be installed and run on the computer acting as the Central Node.
      ```
    You can check the live logs anytime with `pm2 logs`.
 
-3. **Run Manually (Dev Mode):**
+4. **Run Manually (Dev Mode):**
    ```bash
    npm run dev
    ```
 
-4. **Verify:**
+5. **Verify:**
    The console will indicate that the server is listening. Note the IP address of this computer if you plan to connect agents from other PCs (e.g., `http://192.168.1.50:3579/sse`).
+   Run the regression suite with `npm test`.
+
+---
+
+## 🧠 LLM-backed modules (optional)
+
+Most of the Hub is pure coordination infrastructure and needs no AI provider: it
+routes messages between the agents *you* connect. Three modules are different —
+they call language models themselves and therefore need an external
+[LiteLLM](https://github.com/BerriAI/litellm) router:
+
+| Module | Tools | What it does |
+| --- | --- | --- |
+| `hosted` | `bridge_spawn_conversation`, `bridge_list_models`, `bridge_hosted_status` | Runs debates/panels/reviews between several models with a deterministic turn plan. |
+| `swarm` | `bridge_swarm_*` (8 tools) | Hivemind planning: several models deliberate, a synthesizer emits a structured master plan. It designs — it never executes. |
+| `materialize` | `bridge_materialize_plan`, `bridge_materialize_status` | Turns a stored plan into a real MCP session with tasks published as tickets. |
+
+**Without a LiteLLM router the Hub still starts and the other 23 tools work
+normally** — these 11 will simply return an error explaining that the router is
+unreachable. To enable them, point `LITELLM_URL` at your router and provide its
+master key via `LITELLM_KEY` (or `LITELLM_ENV_FILE`). See `.env.example`.
 
 ---
 
@@ -79,9 +105,9 @@ If you are an AI Agent connecting to the network, configure your MCP client to u
 
 ### Agent Workflow
 
-Once connected, the Hub will expose exactly **21 MCP Tools** covering messaging, shared memory, workspace files, and task discovery. 
+Once connected, the Hub exposes **34 MCP Tools** covering messaging, shared memory, workspace files, task discovery, and multi-model planning.
 
-👉 **[See the Full 21 MCP Tools API Reference](file:///C:/Users/user/Desktop/Two/docs/12-MCP-TOOLS-REFERENCE.md)** 👈
+👉 **[See the Full MCP Tools API Reference](documentation/MCP_TOOLS.md)** 👈
 
 Follow this standard flow:
 

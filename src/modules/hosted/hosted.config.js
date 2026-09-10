@@ -3,9 +3,8 @@ import { readFileSync } from 'node:fs';
 /**
  * Configuración del módulo "hosted" — integración con el router LiteLLM.
  *
- * LITELLM_KEY debe ser una clave MASTER de LiteLLM válida (la que autentica el
- *proxy en localhost:4000). Se toma de la variable de entorno LITELLM_KEY; si no
- *está definida, usa la variable LITELLM_MASTER_KEY del entorno.
+ * Requiere una clave MASTER de LiteLLM válida (la que autentica el proxy).
+ * Ver resolveLiteLLMKey() abajo y .env.example para las variables soportadas.
  *
  * Los modelos listados en `agents` corresponden EXACTAMENTE a los que figuran
  * en el listado de modelos de Hermes (custom_providers en config.yaml), que
@@ -17,24 +16,31 @@ import { readFileSync } from 'node:fs';
  *   DeepSeek LiteLLM    -> deepseek-v4-flash, deepseek-v4-pro,
  *                          deepseek-chat-fallback
  */
-const LITELLM_KEY =
-  process.env.LITELLM_KEY ||
-  process.env.LITELLM_MASTER_KEY ||
-  (() => {
-    // Fallback: leer la master key real del .env del deploy Docker de LiteLLM.
-    // Útil para que corra "de una" sin exportar variables de entorno.
-    const candidates = [
-      'C:/Users/user/Desktop/deploys-docker/litellm-deploy/internal/litellm.env',
-    ];
-    for (const f of candidates) {
-      try {
-        const txt = readFileSync(f, 'utf8');
-        const m = txt.match(/^\s*LITELLM_MASTER_KEY\s*=\s*(.+)\s*$/m);
-        if (m && m[1]) return m[1].trim().replace(/^['"]|['"]$/g, '');
-      } catch (_) { /* continuar */ }
-    }
-    return '<pon_aqui_tu_key_master_real>';
-  })();
+/**
+ * Resuelve la master key de LiteLLM, en orden de precedencia:
+ *   1. LITELLM_KEY / LITELLM_MASTER_KEY   — la key directamente en el entorno.
+ *   2. LITELLM_ENV_FILE                   — ruta a un archivo tipo .env del que
+ *                                           se extrae LITELLM_MASTER_KEY.
+ * Devuelve '' si no hay ninguna configurada, para que el modulo avise en el
+ * arranque en vez de fallar recien al primer request.
+ */
+export function resolveLiteLLMKey() {
+  const direct = process.env.LITELLM_KEY || process.env.LITELLM_MASTER_KEY;
+  if (direct) return direct.trim();
+
+  const envFile = process.env.LITELLM_ENV_FILE;
+  if (envFile) {
+    try {
+      const txt = readFileSync(envFile, 'utf8');
+      const m = txt.match(/^\s*LITELLM_MASTER_KEY\s*=\s*(.+)\s*$/m);
+      if (m && m[1]) return m[1].trim().replace(/^['"]|['"]$/g, '');
+    } catch (_) { /* archivo ausente o ilegible: se trata como "sin key" */ }
+  }
+
+  return '';
+}
+
+const LITELLM_KEY = resolveLiteLLMKey();
 
 export const hostedConfig = {
   liteLLM: {
