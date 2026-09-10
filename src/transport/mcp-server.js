@@ -222,7 +222,16 @@ export class MCPServerTransport {
       }
 
       logger.warn({ requestedSessionId: sessionId, activeSessions: Array.from(transportSessions.keys()) }, 'Received POST for unknown session');
-      res.status(404).send('Session not found');
+      // Cuerpo JSON-RPC en vez de texto plano: el cliente puede parsearlo y saber
+      // que debe reiniciar el handshake en vez de tratarlo como error de red.
+      res.status(404).json({
+        jsonrpc: '2.0',
+        id: req.body?.id ?? null,
+        error: {
+          code: -32001,
+          message: 'Session expired or unknown. Re-initialize the MCP connection.',
+        },
+      });
     };
 
     // DPD Proactivo (cada 30s)
@@ -241,16 +250,21 @@ export class MCPServerTransport {
       }
     }, 30000);
 
-    // Cleanup de sesiones inactivas de transporte HTTP (cada 2 min)
+    // Cleanup de sesiones inactivas de transporte HTTP.
+    // El TTL debe superar con holgura el intervalo de polling de los agentes (la guia
+    // recomienda 60s) y tolerar pausas humanas. Con los 120s anteriores el hub
+    // descartaba la sesion antes de que el cliente volviera y este recibia 404
+    // "Session not found" en cada reconexion.
+    const SESSION_TTL_MS = Number(process.env.MCP_SESSION_TTL_MS) || 30 * 60 * 1000;
     setInterval(() => {
       const now = Date.now();
       for (const [id, transport] of transportSessions) {
-        if (transport.sessionId && (now - (transport._lastActivity || now)) > 120000) {
+        if (transport.sessionId && (now - (transport._lastActivity || now)) > SESSION_TTL_MS) {
           logger.info({ sessionId: id }, 'Removing inactive HTTP transport session');
           transportSessions.delete(id);
         }
       }
-    }, 120000);
+    }, 60000);
 
     app.get('/sse', route);
     app.post('/sse', route);

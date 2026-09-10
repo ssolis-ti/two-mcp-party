@@ -149,6 +149,13 @@ export class SessionsService {
     if (session.mode !== 'free') throw new Error('bridge_complete_goal is only available in free mode');
     if (session.status !== 'active') throw new Error(`Session is not active (current status: ${session.status})`);
 
+    const participant = this.db
+      .prepare('SELECT name FROM agents WHERE name = ? AND current_session_id = ?')
+      .get(agentName, sessionId);
+    if (!participant) {
+      throw new Error(`Agent '${agentName}' no participa en la sesion ${sessionId}. Use bridge_join_session primero.`);
+    }
+
     const config = JSON.parse(session.mode_config);
     const currentIndex = config.current_goal_index || 0;
     const completedGoal = config.goals[currentIndex];
@@ -204,10 +211,26 @@ export class SessionsService {
     }
 
     if (action === 'continue') {
+      // Sesiones sin goals (autopilot / moderator) no tienen "siguiente objetivo":
+      // se pausaron por agotar max_turns, asi que reanudar significa devolverles
+      // presupuesto de turnos. Sin esto el primer mensaje volvia a pausar la sesion
+      // y el modo autopilot quedaba muerto de forma permanente.
+      if (!config.goals || config.goals.length === 0) {
+        this.db.prepare(
+          "UPDATE sessions SET status = 'active', turn_count = 0, updated_at = datetime('now') WHERE id = ?"
+        ).run(sessionId);
+        return {
+          success: true,
+          status: 'active',
+          turn_count: 0,
+          message: `Session reactivated with a fresh turn budget (${config.max_turns || MODE_DEFAULTS.autopilot.max_turns} turns).`
+        };
+      }
+
       // Avanzar al siguiente goal
       const nextIndex = (config.current_goal_index || 0) + 1;
 
-      if (config.goals && nextIndex >= config.goals.length) {
+      if (nextIndex >= config.goals.length) {
         // Todos los goals completados
         this.db.prepare(
           "UPDATE sessions SET status = 'completed', updated_at = datetime('now') WHERE id = ?"

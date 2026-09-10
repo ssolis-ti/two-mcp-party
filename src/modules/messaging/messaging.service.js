@@ -111,16 +111,16 @@ export class MessagingService {
       const msgId = generateId('msg');
 
       const stmt = this.db.prepare(`
-        INSERT INTO messages (id, session_id, from_agent, content, type, metadata, priority)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (id, session_id, from_agent, content, type, metadata, priority, seq)
+        VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE session_id = ?))
       `);
 
-      stmt.run(msgId, sessionId, from, content, type, JSON.stringify(metadata), priority);
+      stmt.run(msgId, sessionId, from, content, type, JSON.stringify(metadata), priority, sessionId);
 
       if (isLooping) {
         const sysMsgId = generateId('msg');
         const sysContent = "Anti-Looping Protection: Se han detectado llamadas repetidas sin progreso aparente. Por favor, cambia tu estrategia, usa otras herramientas, o detente si estás atascado.";
-        stmt.run(sysMsgId, sessionId, 'SYSTEM', sysContent, 'message', '{}', 'critical');
+        stmt.run(sysMsgId, sessionId, 'SYSTEM', sysContent, 'message', '{}', 'critical', sessionId);
         this.eventBus.emit('message:new', { id: sysMsgId, session_id: sessionId, from: 'SYSTEM', content: sysContent, type: 'message', metadata: {}, priority: 'critical', created_at: new Date().toISOString() });
         logger.warn({ session_id: sessionId, agent: from }, 'Loop detected and intercepted');
       }
@@ -186,11 +186,16 @@ export class MessagingService {
         throw new Error('You must join a session to read messages. Use bridge_join_session.');
       }
 
+      // El limite recorta la COLA reciente, no el principio: un agente que hace
+      // polling necesita lo ultimo que se dijo. Se ordena DESC para recortar y se
+      // reordena ASC para devolver la conversacion en orden cronologico.
       const stmt = this.db.prepare(`
-        SELECT *, rowid as seq FROM messages 
-        WHERE session_id = ?
-        ORDER BY created_at ASC
-        LIMIT ?
+        SELECT * FROM (
+          SELECT *, rowid as seq FROM messages
+          WHERE session_id = ?
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT ?
+        ) ORDER BY created_at ASC, seq ASC
       `);
 
       const messages = stmt.all(agent.current_session_id, limit);

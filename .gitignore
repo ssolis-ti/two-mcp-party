@@ -111,3 +111,5 @@ CHANGELOG.md
 # ===========================
 logs/
 workspaces/
+workspace/
+graphify-out/

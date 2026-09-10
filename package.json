@@ -13,7 +13,7 @@
     "dev": "set DEBUG_MODE=true && node src/index.js",
     "service:install-windows": ".\\scripts\\install-windows-service.bat",
     "service:install-linux": "bash ./scripts/install-linux-service.sh",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test \"tests/**/*.test.mjs\""
   },
   "repository": {
     "type": "git",
