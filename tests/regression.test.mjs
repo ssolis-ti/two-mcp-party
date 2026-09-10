@@ -5,7 +5,7 @@ import { makeDb, makeBus, addAgent, seedMessage } from './helpers.mjs';
 import { MessagingService } from '../src/modules/messaging/messaging.service.js';
 import { SessionsService } from '../src/modules/sessions/sessions.service.js';
 import { WorkspacesService } from '../src/modules/workspaces/workspaces.service.js';
-import { LiteLLMClient } from '../src/modules/hosted/litellm-client.js';
+import { LLMGatewayClient } from '../src/modules/hosted/llm-gateway-client.js';
 
 function setup() {
   const db = makeDb();
@@ -241,28 +241,76 @@ describe('workspaces.getSafePath', () => {
   });
 });
 
-describe('LiteLLMClient', () => {
-  // Puerto cerrado (fuera de la blocklist de fetch): simula el router apagado.
-  const dead = () => new LiteLLMClient({ baseUrl: 'http://127.0.0.1:45999', timeoutMs: 3000 });
+describe('LLMGatewayClient', () => {
+  // Puerto cerrado (fuera de la blocklist de fetch): simula el gateway apagado.
+  const dead = () => new LLMGatewayClient({ baseUrl: 'http://127.0.0.1:45999', timeoutMs: 3000 });
 
-  test('chat() explica que el router no responde en vez de "fetch failed"', async () => {
+  test('chat() explica que el gateway no responde en vez de "fetch failed"', async () => {
     await assert.rejects(
       () => dead().chat({ model: 'x', messages: [{ role: 'user', content: 'hola' }] }),
       (err) => {
-        assert.match(err.message, /LiteLLM no responde/i);
+        assert.match(err.message, /gateway de LLMs no responde/i);
         assert.match(err.message, /127\.0\.0\.1:45999/, 'el error debe nombrar el endpoint que fallo');
         return true;
       }
     );
   });
 
-  test('listModels() explica que el router no responde', async () => {
+  test('listModels() explica que el gateway no responde', async () => {
     await assert.rejects(
       () => dead().listModels(),
       (err) => {
-        assert.match(err.message, /LiteLLM no responde/i);
+        assert.match(err.message, /gateway de LLMs no responde/i);
         return true;
       }
     );
+  });
+});
+
+describe('resolveGatewayKey', () => {
+  const withEnv = async (vars, fn) => {
+    const saved = {};
+    for (const [k, v] of Object.entries(vars)) {
+      saved[k] = process.env[k];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    try {
+      return await fn();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  };
+
+  const CLEAR = {
+    LLM_GATEWAY_KEY: undefined,
+    LLM_GATEWAY_ENV_FILE: undefined,
+    LITELLM_KEY: undefined,
+    LITELLM_MASTER_KEY: undefined,
+    LITELLM_ENV_FILE: undefined,
+  };
+
+  test('prefiere LLM_GATEWAY_KEY', async () => {
+    const { resolveGatewayKey } = await import('../src/modules/hosted/hosted.config.js');
+    await withEnv({ ...CLEAR, LLM_GATEWAY_KEY: 'nueva', LITELLM_KEY: 'vieja' }, () => {
+      assert.equal(resolveGatewayKey(), 'nueva');
+    });
+  });
+
+  test('acepta LITELLM_KEY como alias historico', async () => {
+    const { resolveGatewayKey } = await import('../src/modules/hosted/hosted.config.js');
+    await withEnv({ ...CLEAR, LITELLM_KEY: 'heredada' }, () => {
+      assert.equal(resolveGatewayKey(), 'heredada');
+    });
+  });
+
+  test('devuelve cadena vacia cuando no hay nada configurado', async () => {
+    const { resolveGatewayKey } = await import('../src/modules/hosted/hosted.config.js');
+    await withEnv({ ...CLEAR, LLM_GATEWAY_ENV_FILE: 'C:/ruta/que/no/existe.env' }, () => {
+      assert.equal(resolveGatewayKey(), '');
+    });
   });
 });

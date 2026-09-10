@@ -78,9 +78,9 @@ The server must be installed and run on the computer acting as the Central Node.
 ## 🧠 LLM-backed modules (optional)
 
 Most of the Hub is pure coordination infrastructure and needs no AI provider: it
-routes messages between the agents *you* connect. Three modules are different —
-they call language models themselves and therefore need an external
-[LiteLLM](https://github.com/BerriAI/litellm) router:
+routes messages between the agents *you* connect, each of which brings its own
+model. Three modules are different — they call language models *themselves* and
+therefore need an external gateway:
 
 | Module | Tools | What it does |
 | --- | --- | --- |
@@ -88,10 +88,28 @@ they call language models themselves and therefore need an external
 | `swarm` | `bridge_swarm_*` (8 tools) | Hivemind planning: several models deliberate, a synthesizer emits a structured master plan. It designs — it never executes. |
 | `materialize` | `bridge_materialize_plan`, `bridge_materialize_status` | Turns a stored plan into a real MCP session with tasks published as tickets. |
 
-**Without a LiteLLM router the Hub still starts and the other 23 tools work
-normally** — these 11 will simply return an error explaining that the router is
-unreachable. To enable them, point `LITELLM_URL` at your router and provide its
-master key via `LITELLM_KEY` (or `LITELLM_ENV_FILE`). See `.env.example`.
+**Without a gateway the Hub still starts and the other 23 tools work normally** —
+these 11 simply return an error explaining that the gateway is unreachable.
+
+### Any OpenAI-compatible gateway works
+
+The Hub does **not** integrate providers. It speaks one dialect — the OpenAI
+chat API — and delegates provider multiplexing, fallback and rate limiting to
+the gateway. So there is nothing to implement per provider: point the URL at
+whichever you run.
+
+```bash
+LLM_GATEWAY_URL=http://localhost:4000   # LiteLLM
+LLM_GATEWAY_URL=http://localhost:8080   # Bifrost
+LLM_GATEWAY_URL=http://localhost:8000   # vLLM
+LLM_GATEWAY_URL=https://openrouter.ai/api
+```
+
+LM Studio, Ollama and the OpenAI API itself work the same way. Provide the key
+via `LLM_GATEWAY_KEY` (or `LLM_GATEWAY_ENV_FILE`), and set the model names in
+`hosted.config.js` to whatever your gateway exposes — `bridge_list_models` lists
+them. The `LITELLM_*` variables are still accepted as aliases. See
+`.env.example`.
 
 ---
 

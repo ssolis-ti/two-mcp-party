@@ -1,6 +1,6 @@
 import { logger } from '../../core/logger.js';
 import { generateId } from '../../utils/id.js';
-import { LiteLLMClient } from '../hosted/litellm-client.js';
+import { LLMGatewayClient } from '../hosted/llm-gateway-client.js';
 
 /**
  * SwarmService — "Mente colmena" planificadora.
@@ -36,21 +36,21 @@ export class SwarmService {
     // colapsaba el plan a 1 tarea. Fallamos de forma explícita y temprana en vez
     // de dejar que degrade silenciosamente (no usamos Zod: validación manual, sin
     // añadir dependencia al stack del harness).
-    const lite = config && config.liteLLM;
-    if (!lite || !lite.baseUrl) throw new Error('[swarm] config.liteLLM.baseUrl es requerido (config inválida).');
+    const lite = config && config.gateway;
+    if (!lite || !lite.baseUrl) throw new Error('[swarm] config.gateway.baseUrl es requerido (config inválida).');
     const synth = Number(lite.synthMaxTokens);
     if (!Number.isFinite(synth) || synth < 2000) {
       throw new Error(
-        `[swarm] config.liteLLM.synthMaxTokens debe ser un número >= 2000 (actual: ${lite.synthMaxTokens}). ` +
+        `[swarm] config.gateway.synthMaxTokens debe ser un número >= 2000 (actual: ${lite.synthMaxTokens}). ` +
         'Con presupuesto pequeño el sintetizador trunca su salida y colapsa el plan a 1 tarea.'
       );
     }
     if (!Number.isFinite(Number(lite.maxTokens)) || Number(lite.maxTokens) < 200) {
-      throw new Error(`[swarm] config.liteLLM.maxTokens debe ser un número >= 200 (actual: ${lite.maxTokens}).`);
+      throw new Error(`[swarm] config.gateway.maxTokens debe ser un número >= 200 (actual: ${lite.maxTokens}).`);
     }
-    this.client = new LiteLLMClient({
+    this.client = new LLMGatewayClient({
       baseUrl: lite.baseUrl,
-      apiKey: config.liteLLM.apiKey,
+      apiKey: config.gateway.apiKey,
       timeoutMs: lite.timeoutMs,
     });
     this._seedSkills();
@@ -121,8 +121,8 @@ export class SwarmService {
             ].join('\n'),
           },
         ],
-        max_tokens: this.config.liteLLM.maxTokens,
-        temperature: this.config.liteLLM.temperature,
+        max_tokens: this.config.gateway.maxTokens,
+        temperature: this.config.gateway.temperature,
       });
     }
 
@@ -202,7 +202,7 @@ export class SwarmService {
     const { text } = await this.client.chat({
       model: synth.model,
       messages,
-      max_tokens: this.config.liteLLM.synthMaxTokens || Math.max(1500, this.config.liteLLM.maxTokens),
+      max_tokens: this.config.gateway.synthMaxTokens || Math.max(1500, this.config.gateway.maxTokens),
       temperature: 0.3,
     });
 

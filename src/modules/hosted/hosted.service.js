@@ -1,7 +1,7 @@
 import { logger } from '../../core/logger.js';
 import { generateId } from '../../utils/id.js';
 import { Orchestrator } from './orchestrator.js';
-import { LiteLLMClient } from './litellm-client.js';
+import { LLMGatewayClient } from './llm-gateway-client.js';
 
 /**
  * HostedService: exposes the models of the LiteLLM router as *real* agents in
@@ -34,10 +34,10 @@ export class HostedService {
 
   initialize({ config }) {
     this.config = config;
-    this.client = new LiteLLMClient({
-      baseUrl: config.liteLLM.baseUrl,
-      apiKey: config.liteLLM.apiKey,
-      timeoutMs: config.liteLLM.timeoutMs,
+    this.client = new LLMGatewayClient({
+      baseUrl: config.gateway.baseUrl,
+      apiKey: config.gateway.apiKey,
+      timeoutMs: config.gateway.timeoutMs,
     });
 
     if (!this._listening) {
@@ -250,8 +250,8 @@ export class HostedService {
       const { text, model, usage } = await this.client.chat({
         model: participant.model,
         messages: turn.messages,
-        max_tokens: this.config.liteLLM.maxTokens,
-        temperature: this.config.liteLLM.temperature,
+        max_tokens: this.config.gateway.maxTokens,
+        temperature: this.config.gateway.temperature,
       });
 
       const content = (text || '').trim();

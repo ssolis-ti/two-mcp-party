@@ -33,14 +33,15 @@ export default {
     const tools = getHostedTools(serviceInstance);
     engine.registry.tools.push(...tools);
 
-    if (!hostedConfig.liteLLM.apiKey) {
+    if (!hostedConfig.gateway.apiKey) {
       logger.warn(
-        'Hosted module: no LiteLLM key configured. Set LITELLM_KEY (or LITELLM_ENV_FILE ' +
-        'pointing at an env file with LITELLM_MASTER_KEY) before running conversations. See .env.example.'
+        `Hosted module: no gateway key configured for ${hostedConfig.gateway.baseUrl}. ` +
+        'Set LLM_GATEWAY_KEY (or LLM_GATEWAY_ENV_FILE pointing at an env file) ' +
+        'before running conversations. See .env.example.'
       );
     }
 
-    logger.info('Hosted module loaded (LiteLLM model-agents available). Models configured: ' +
+    logger.info('Hosted module loaded (gateway model-agents available). Models configured: ' +
       hostedConfig.agents.map((a) => `${a.role}=${a.model}`).join(', '));
   },
 };

@@ -1,15 +1,18 @@
 import { logger } from '../../core/logger.js';
 
 /**
- * Thin OpenAI-compatible HTTP client for the LiteLLM proxy.
- * Endpoint: {LITELLM_URL}/v1/chat/completions
- * Auth:     Authorization: Bearer {LITELLM_KEY}
+ * Cliente HTTP delgado contra un gateway de LLMs con API OpenAI-compatible.
+ * Endpoint: {LLM_GATEWAY_URL}/v1/chat/completions
+ * Auth:     Authorization: Bearer {LLM_GATEWAY_KEY}
  *
- * LiteLLM returns standard OpenAI chat format and applies its own
- * fallback/routing strategy on the server, so this client only needs to
- * forward `model`, `messages`, `max_tokens`, `temperature`, `tools`, etc.
+ * Deliberadamente agnostico del proveedor: solo habla el dialecto de chat de
+ * OpenAI y reenvia `model`, `messages`, `max_tokens`, `temperature`, `tools`.
+ * Quien multiplexa proveedores, hace fallback y aplica rate limits es el
+ * gateway, no este hub. Por eso funciona sin cambios contra LiteLLM, Bifrost,
+ * vLLM, LM Studio, Ollama (endpoint OpenAI), OpenRouter o la API de OpenAI:
+ * basta apuntar la URL al que uses.
  */
-export class LiteLLMClient {
+export class LLMGatewayClient {
   constructor({ baseUrl = 'http://localhost:4000', apiKey = '', timeoutMs = 240000 } = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.apiKey = apiKey;
@@ -18,7 +21,7 @@ export class LiteLLMClient {
 
   /**
    * fetch() de Node falla con un escueto "fetch failed" y esconde la causa real en
-   * err.cause. Sin esto, un router apagado le llega al agente como "fetch failed",
+   * err.cause. Sin esto, un gateway apagado le llega al agente como "fetch failed",
    * que no le dice ni que backend fallo ni que puede hacer al respecto.
    */
   _wrapNetworkError(err, endpoint) {
@@ -29,8 +32,8 @@ export class LiteLLMClient {
     const unreachable = ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'ECONNRESET', 'EAI_AGAIN'];
     const detail = code || err?.cause?.message || 'causa desconocida';
     const hint = unreachable.includes(code)
-      ? `El router LiteLLM no responde en ${this.baseUrl}. Verifica que este levantado antes de reintentar.`
-      : `El router LiteLLM no responde en ${this.baseUrl} (${detail}).`;
+      ? `El gateway de LLMs no responde en ${this.baseUrl}. Verifica que este levantado antes de reintentar.`
+      : `El gateway de LLMs no responde en ${this.baseUrl} (${detail}).`;
     return new Error(`${hint} [${endpoint}]`, { cause: err });
   }
 
@@ -41,9 +44,9 @@ export class LiteLLMClient {
    */
   async chat(params) {
     const { model, messages, ...rest } = params;
-    if (!model) throw new Error('LiteLLMClient.chat: model is required');
+    if (!model) throw new Error('LLMGatewayClient.chat: model is required');
     if (!Array.isArray(messages) || messages.length === 0) {
-      throw new Error('LiteLLMClient.chat: messages array is required');
+      throw new Error('LLMGatewayClient.chat: messages array is required');
     }
 
     const body = {
@@ -52,7 +55,7 @@ export class LiteLLMClient {
       ...rest,
     };
 
-    logger.debug({ model, msgCount: messages.length, baseUrl: this.baseUrl }, 'LiteLLM chat request');
+    logger.debug({ model, msgCount: messages.length, baseUrl: this.baseUrl }, 'Gateway chat request');
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -70,7 +73,7 @@ export class LiteLLMClient {
 
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
-        throw new Error(`LiteLLM HTTP ${res.status}: ${errText.slice(0, 500)}`);
+        throw new Error(`Gateway HTTP ${res.status}: ${errText.slice(0, 500)}`);
       }
 
       const data = await res.json();
@@ -102,7 +105,7 @@ export class LiteLLMClient {
       };
     } catch (err) {
       if (err.name === 'AbortError') {
-        throw new Error(`LiteLLM request timed out after ${this.timeoutMs}ms (model ${model})`);
+        throw new Error(`Gateway request timed out after ${this.timeoutMs}ms (model ${model})`);
       }
       throw this._wrapNetworkError(err, '/v1/chat/completions');
     } finally {
@@ -121,14 +124,14 @@ export class LiteLLMClient {
         signal: controller.signal,
       });
       if (!res.ok) {
-        throw new Error(`LiteLLM /v1/models HTTP ${res.status}`);
+        throw new Error(`Gateway /v1/models HTTP ${res.status}`);
       }
       const data = await res.json();
       return (data?.data || []).map((m) => m.id).filter(Boolean);
     } catch (err) {
-      logger.error({ err, baseUrl: this.baseUrl }, 'Failed to list LiteLLM models');
+      logger.error({ err, baseUrl: this.baseUrl }, 'Failed to list gateway models');
       if (err.name === 'AbortError') {
-        throw new Error(`LiteLLM /v1/models timed out after ${this.timeoutMs}ms`);
+        throw new Error(`Gateway /v1/models timed out after ${this.timeoutMs}ms`);
       }
       throw this._wrapNetworkError(err, '/v1/models');
     } finally {

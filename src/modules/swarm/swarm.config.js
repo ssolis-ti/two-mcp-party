@@ -11,16 +11,15 @@ import { hostedConfig } from '../hosted/hosted.config.js';
  *   las ejecuten (vía MCP/JSON-RPC o cualquier ejecutor). La deliberación
  *   colaborativa entre modelos solo se usa para DISEÑAR el plan maestro.
  *
- * Reutiliza la master key y el baseUrl del módulo "hosted" (mismo router
- * LiteLLM en localhost:4000), de modo que NO se duplica configuración.
+ * Reutiliza el gateway del módulo "hosted" (misma URL y misma key), de modo
+ * que NO se duplica configuración ni resolución de credenciales.
  */
 
 export const swarmConfig = {
-  liteLLM: {
-    baseUrl: process.env.LITELLM_URL || hostedConfig.liteLLM.baseUrl || 'http://localhost:4000',
-    // Misma key que el modulo hosted: un unico punto de resolucion (ver hosted.config.js).
-    apiKey: hostedConfig.liteLLM.apiKey,
-    timeoutMs: 240000,   // 240s, coherente con request_timeout del router
+  gateway: {
+    baseUrl: hostedConfig.gateway.baseUrl,
+    apiKey: hostedConfig.gateway.apiKey,
+    timeoutMs: 240000,   // 240s, coherente con el request_timeout tipico de un gateway
     maxTokens: 1200,     // deliberación de diseño (modelos aportan ~150 palabras)
     synthMaxTokens: 5000, // SINTETIZADOR necesita presupuesto para leer la deliberación
                           // completa + emitir un JSON con 2-8 tareas (6 campos c/u).

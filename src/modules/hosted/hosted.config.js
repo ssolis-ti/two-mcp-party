@@ -1,38 +1,40 @@
 import { readFileSync } from 'node:fs';
 
 /**
- * Configuración del módulo "hosted" — integración con el router LiteLLM.
+ * Configuración del módulo "hosted" — conexión a un gateway de LLMs.
  *
- * Requiere una clave MASTER de LiteLLM válida (la que autentica el proxy).
- * Ver resolveLiteLLMKey() abajo y .env.example para las variables soportadas.
+ * El hub NO integra proveedores: habla un unico dialecto (chat de OpenAI)
+ * contra un gateway que se encarga de multiplexar proveedores, hacer fallback
+ * y aplicar rate limits. Sirve cualquiera que exponga API OpenAI-compatible
+ * —LiteLLM, Bifrost, vLLM, LM Studio, Ollama, OpenRouter, la API de OpenAI—
+ * apuntando LLM_GATEWAY_URL al que uses.
  *
- * Los modelos listados en `agents` corresponden EXACTAMENTE a los que figuran
- * en el listado de modelos de Hermes (custom_providers en config.yaml), que
- * apuntan al mismo router LiteLLM en localhost:4000:
- *
- *   NVIDIA NIM LiteLLM  -> nvidia-* (rate limit ~40 RPM, gratis)
- *   Inference LiteLLM   -> deepseek-via-inference*, gemini-3.7-flash, kimi-k3*,
- *                          glm-5.3*, grok-4.6
- *   DeepSeek LiteLLM    -> deepseek-v4-flash, deepseek-v4-pro,
- *                          deepseek-chat-fallback
+ * Los nombres de `agents[].model` son strings que el gateway debe reconocer;
+ * cambialos por los que exponga tu instancia. Ver .env.example.
  */
+
+/** Gateway URL. LITELLM_URL se acepta como alias historico. */
+export const GATEWAY_URL =
+  process.env.LLM_GATEWAY_URL || process.env.LITELLM_URL || 'http://localhost:4000';
+
 /**
- * Resuelve la master key de LiteLLM, en orden de precedencia:
- *   1. LITELLM_KEY / LITELLM_MASTER_KEY   — la key directamente en el entorno.
- *   2. LITELLM_ENV_FILE                   — ruta a un archivo tipo .env del que
- *                                           se extrae LITELLM_MASTER_KEY.
+ * Resuelve la API key del gateway, en orden de precedencia:
+ *   1. LLM_GATEWAY_KEY (o los alias LITELLM_KEY / LITELLM_MASTER_KEY).
+ *   2. LLM_GATEWAY_ENV_FILE (alias LITELLM_ENV_FILE): ruta a un archivo tipo
+ *      .env del que se extrae LLM_GATEWAY_KEY o LITELLM_MASTER_KEY.
  * Devuelve '' si no hay ninguna configurada, para que el modulo avise en el
  * arranque en vez de fallar recien al primer request.
  */
-export function resolveLiteLLMKey() {
-  const direct = process.env.LITELLM_KEY || process.env.LITELLM_MASTER_KEY;
+export function resolveGatewayKey() {
+  const direct =
+    process.env.LLM_GATEWAY_KEY || process.env.LITELLM_KEY || process.env.LITELLM_MASTER_KEY;
   if (direct) return direct.trim();
 
-  const envFile = process.env.LITELLM_ENV_FILE;
+  const envFile = process.env.LLM_GATEWAY_ENV_FILE || process.env.LITELLM_ENV_FILE;
   if (envFile) {
     try {
       const txt = readFileSync(envFile, 'utf8');
-      const m = txt.match(/^\s*LITELLM_MASTER_KEY\s*=\s*(.+)\s*$/m);
+      const m = txt.match(/^\s*(?:LLM_GATEWAY_KEY|LITELLM_MASTER_KEY)\s*=\s*(.+)\s*$/m);
       if (m && m[1]) return m[1].trim().replace(/^['"]|['"]$/g, '');
     } catch (_) { /* archivo ausente o ilegible: se trata como "sin key" */ }
   }
@@ -40,26 +42,18 @@ export function resolveLiteLLMKey() {
   return '';
 }
 
-const LITELLM_KEY = resolveLiteLLMKey();
-
 export const hostedConfig = {
-  liteLLM: {
-    baseUrl: process.env.LITELLM_URL || 'http://localhost:4000',
-    apiKey: LITELLM_KEY,
-    timeoutMs: 240000,  // 240s (coherente con request_timeout del router)
+  gateway: {
+    baseUrl: GATEWAY_URL,
+    apiKey: resolveGatewayKey(),
+    timeoutMs: 240000,  // 240s (coherente con el request_timeout tipico de un gateway)
     maxTokens: 1024,
     temperature: 0.7,
   },
 
-  // Mapeo de agentes alojados -> modelos del router LiteLLM.
-  // Todos estos modelos están en el listado de Hermes (localhost:4000).
-  // Cambia `model` por cualquiera que figure en tu config de Hermes:
-  //  nvidia-deepseek-flash, nvidia-deepseek-pro, nvidia-nemotron,
-  //  nvidia-minimax-m3, nvidia-gpt-oss-120b, nvidia-gpt-oss-20b,
-  //  nvidia-nemotron-nano-30b, nvidia-kimi-k2-6, nvidia-nemotron-ultra-550b,
-  //  deepseek-via-inference, deepseek-via-inference-pro, gemini-3.7-flash,
-  //  kimi-k3, kimi-k3-fast, glm-5.3, glm-5.3-flash, grok-4.6,
-  //  deepseek-v4-flash, deepseek-v4-pro, deepseek-chat-fallback.
+  // Mapeo de agentes alojados -> nombres de modelo que el gateway debe reconocer.
+  // Estos valores son de ejemplo: reemplazalos por los que exponga tu instancia
+  // (consultables con bridge_list_models o el /v1/models de tu gateway).
   agents: [
     {
       name: 'producer',
