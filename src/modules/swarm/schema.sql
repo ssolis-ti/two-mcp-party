@@ -36,7 +36,11 @@ CREATE TABLE IF NOT EXISTS swarm_skills (
   name          TEXT NOT NULL,
   domain        TEXT,
   description   TEXT,
-  source        TEXT NOT NULL DEFAULT 'known',   -- known | proposed (faltante)
+  -- known    : capacidad real del catalogo semilla.
+  -- proposed : la exige una tarea y NO existe en el catalogo -> carencia real.
+  -- orphan   : sugerido en su momento a nivel de plan, pero ninguna tarea lo
+  --            exige. Se conserva como registro historico; no es una carencia.
+  source        TEXT NOT NULL DEFAULT 'known',   -- known | proposed | orphan
   agent         TEXT,                            -- agente que lo posee (si es conocido)
   confidence    REAL DEFAULT 1.0,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))

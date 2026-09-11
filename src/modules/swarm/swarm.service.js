@@ -487,6 +487,50 @@ export class SwarmService {
     return proposed;
   }
 
+  /**
+   * Los skills faltantes de un plan se DERIVAN de las capabilities que ninguna
+   * tarea logro resolver contra el catalogo conocido.
+   *
+   * Antes el sintetizador emitia ademas una lista `missing_skills` a nivel de
+   * plan que se catalogaba tal cual. Eran dos vocabularios distintos que nunca
+   * se cruzaban: medido sobre la base real, 36 de 49 skills del catalogo no los
+   * exigia ninguna tarea. Un skill que ninguna tarea necesita no es una carencia
+   * del plan, es ruido. Ahora solo cuenta lo que esta atado a trabajo concreto.
+   *
+   * Lo que el modelo sugirio y no aparece en ninguna tarea no se cataloga, pero
+   * tampoco se descarta en silencio: se devuelve como `unattached` para que la
+   * desalineacion sea visible.
+   */
+  _deriveMissingSkills(planId, modelSuggestions) {
+    const missing = this.db.prepare(`
+      SELECT DISTINCT s.name FROM swarm_task_skills ts
+      JOIN swarm_skills s ON s.id = ts.skill_id
+      JOIN swarm_tasks  t ON t.id = ts.task_id
+      WHERE t.plan_id = ? AND s.source = 'proposed'
+      ORDER BY s.name`).all(planId).map((r) => r.name);
+
+    const raw = typeof modelSuggestions === 'string' ? [modelSuggestions] : (modelSuggestions || []);
+    const norm = (s) => String(s).trim().toLowerCase();
+    const attached = new Set(
+      this.db.prepare(`
+        SELECT DISTINCT s.name FROM swarm_task_skills ts
+        JOIN swarm_skills s ON s.id = ts.skill_id
+        JOIN swarm_tasks  t ON t.id = ts.task_id
+        WHERE t.plan_id = ?`).all(planId).map((r) => norm(r.name))
+    );
+    const unattached = raw
+      .filter((s) => s && typeof s === 'string' && !attached.has(norm(s)))
+      .map((s) => s.trim());
+
+    if (unattached.length) {
+      logger.info(
+        { plan_id: planId, unattached },
+        'Skills sugeridos por el sintetizador que ninguna tarea exige: no se catalogan'
+      );
+    }
+    return { missing, unattached };
+  }
+
   _persistDisputes(planId, disputes) {
     if (!Array.isArray(disputes) || !disputes.length) return 0;
     const ins = this.db.prepare(
@@ -812,22 +856,17 @@ export class SwarmService {
       taskIds.push({ id: taskId, title: t.title || 'Tarea' });
     }
 
-    // Catalogar skills faltantes propuestas.
-    const insSkill = this.db.prepare(
-      "INSERT INTO swarm_skills (id, name, domain, description, source) VALUES (?, ?, 'proposed', ?, 'proposed')"
-    );
-    for (const ms of plan.missing_skills || []) {
-      if (ms && typeof ms === 'string') {
-        const exists = this.db.prepare('SELECT name FROM swarm_skills WHERE name = ?').get(ms);
-        if (!exists) insSkill.run(generateId('skl'), ms.trim(), 'Propuesto por mente colmena como skill faltante');
-      }
-    }
+    // Los skills faltantes se derivan de las capabilities sin resolver, ya
+    // catalogadas por _linkTaskSkills. Ver _deriveMissingSkills.
+    const skillGap = this._deriveMissingSkills(planId, plan.missing_skills);
 
     const meta = {
       summary: plan.summary || objective.trim(),
       tasks: taskIds,
       // Normaliza risks: el extractor tolerante puede devolver un string en vez de array.
-      missing_skills: (plan.missing_skills && typeof plan.missing_skills === 'string' ? [plan.missing_skills] : plan.missing_skills) || [],
+      // Derivado de capabilities sin resolver, no de la lista que emitio el modelo.
+      missing_skills: skillGap.missing,
+      unattached_skill_suggestions: skillGap.unattached,
       risks: typeof plan.risks === 'string' && plan.risks.trim() ? plan.risks.split(',').map((s) => s.trim()).filter(Boolean)
         : (Array.isArray(plan.risks) ? plan.risks : []),
     };
@@ -862,7 +901,8 @@ export class SwarmService {
       },
       disputes,
       tasks: taskIds,
-      missing_skills: plan.missing_skills || [],
+      missing_skills: skillGap.missing,
+      unattached_skill_suggestions: skillGap.unattached,
       risks: plan.risks || [],
       message: warnings.length
         ? `ATENCION: ${warnings.join('. ')}.`
@@ -932,21 +972,16 @@ export class SwarmService {
       taskIds.push({ id: taskId, title: t.title || 'Tarea' });
     }
 
-    // Catalogar skills faltantes propuestas.
-    const insSkill = this.db.prepare(
-      "INSERT INTO swarm_skills (id, name, domain, description, source) VALUES (?, ?, 'proposed', ?, 'proposed')"
-    );
-    for (const ms of plan.missing_skills || []) {
-      if (ms && typeof ms === 'string') {
-        const exists = this.db.prepare('SELECT name FROM swarm_skills WHERE name = ?').get(ms);
-        if (!exists) insSkill.run(generateId('skl'), ms.trim(), 'Propuesto por debate como skill faltante');
-      }
-    }
+    // Mismo criterio que en createPlan: los skills faltantes se derivan de las
+    // capabilities sin resolver, no de una lista paralela. Ver _deriveMissingSkills.
+    const skillGap = this._deriveMissingSkills(planId, plan.missing_skills);
 
     const meta = {
       summary: plan.summary || objective.trim(),
       tasks: taskIds,
-      missing_skills: (plan.missing_skills && typeof plan.missing_skills === 'string' ? [plan.missing_skills] : plan.missing_skills) || [],
+      // Derivado de capabilities sin resolver, no de la lista que emitio el modelo.
+      missing_skills: skillGap.missing,
+      unattached_skill_suggestions: skillGap.unattached,
       risks: typeof plan.risks === 'string' && plan.risks.trim() ? plan.risks.split(',').map((s) => s.trim()).filter(Boolean)
         : (Array.isArray(plan.risks) ? plan.risks : []),
     };
@@ -965,7 +1000,8 @@ export class SwarmService {
       debate_contributions: contributions.length,
       summary: plan.summary,
       tasks: taskIds,
-      missing_skills: plan.missing_skills || [],
+      missing_skills: skillGap.missing,
+      unattached_skill_suggestions: skillGap.unattached,
       risks: plan.risks || [],
       message: 'Plan maestro creado a partir del debate. Consulta bridge_swarm_tasks para las hojas.',
     };
@@ -1039,8 +1075,25 @@ export class SwarmService {
     };
   }
 
-  listSkills() {
-    return this.db.prepare('SELECT * FROM swarm_skills ORDER BY source, domain, name').all();
+  /**
+   * Catalogo de skills. Por defecto oculta los 'orphan' (sugeridos alguna vez a
+   * nivel de plan pero que ninguna tarea exige): se conservan como registro, no
+   * como carencias, y mezclarlos daba un catalogo con mas ruido que señal.
+   */
+  listSkills({ include_orphans = false } = {}) {
+    const rows = include_orphans
+      ? this.db.prepare('SELECT * FROM swarm_skills ORDER BY source, domain, name').all()
+      : this.db.prepare("SELECT * FROM swarm_skills WHERE source != 'orphan' ORDER BY source, domain, name").all();
+    const orphans = this.db.prepare("SELECT COUNT(*) c FROM swarm_skills WHERE source = 'orphan'").get().c;
+    return {
+      known: rows.filter((r) => r.source === 'known').length,
+      proposed: rows.filter((r) => r.source === 'proposed').length,
+      orphans,
+      skills: rows,
+      note: orphans && !include_orphans
+        ? `${orphans} skill(s) marcados 'orphan' quedaron fuera: se sugirieron a nivel de plan pero ninguna tarea los exige. Usa include_orphans para verlos.`
+        : undefined,
+    };
   }
 
   listContributions(plan_id) {

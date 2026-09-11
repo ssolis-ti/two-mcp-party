@@ -648,6 +648,85 @@ describe('trazabilidad tarea -> skill', () => {
   });
 });
 
+describe('missing_skills derivados, no inventados', () => {
+  function swarmWithPlan() {
+    const db = makeDb();
+    const svc = new SwarmService(db, makeBus());
+    svc.config = { gateway: { baseUrl: 'http://x', maxTokens: 500, synthMaxTokens: 2000 }, planning_agents: [], seed_skills: [] };
+    db.prepare("INSERT INTO swarm_plans (id, objective) VALUES ('pln_t','obj')").run();
+    db.prepare("INSERT INTO swarm_tasks (id, plan_id, title) VALUES ('tsk_a','pln_t','Disenar API')").run();
+    db.prepare("INSERT INTO swarm_skills (id, name, domain, source) VALUES ('skl_cod','coding','software','known')").run();
+    return { svc, db };
+  }
+
+  test('solo cuenta como faltante lo que una tarea realmente exige', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['coding', 'vector_store']);
+      const gap = svc._deriveMissingSkills('pln_t', []);
+      assert.deepEqual(gap.missing, ['vector_store'], 'coding existe; vector_store no');
+    } finally { db.cleanup(); }
+  });
+
+  test('lo que el modelo sugiere sin atarlo a una tarea NO ensucia el catalogo', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['coding']);
+      const antes = db.prepare('SELECT COUNT(*) c FROM swarm_skills').get().c;
+
+      const gap = svc._deriveMissingSkills('pln_t', ['observability/traces', 'schema/API']);
+
+      assert.deepEqual(gap.missing, [], 'ninguna tarea exige algo ausente');
+      assert.equal(db.prepare('SELECT COUNT(*) c FROM swarm_skills').get().c, antes,
+        'una sugerencia que ninguna tarea usa no debe crear filas huerfanas');
+    } finally { db.cleanup(); }
+  });
+
+  test('pero tampoco se descarta en silencio: queda como unattached', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['coding']);
+      const gap = svc._deriveMissingSkills('pln_t', ['observability/traces']);
+      assert.deepEqual(gap.unattached, ['observability/traces'], 'la desalineacion debe ser visible');
+    } finally { db.cleanup(); }
+  });
+
+  test('una sugerencia que SI corresponde a una capability no se reporta como suelta', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['vector_store']);
+      const gap = svc._deriveMissingSkills('pln_t', ['Vector_Store ']);
+      assert.deepEqual(gap.unattached, [], 'la comparacion ignora mayusculas y espacios');
+      assert.deepEqual(gap.missing, ['vector_store']);
+    } finally { db.cleanup(); }
+  });
+
+  test('el catalogo separa carencias reales del ruido historico', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['vector_store']);
+      db.prepare("INSERT INTO swarm_skills (id,name,source) VALUES ('skl_o','observability/traces','orphan')").run();
+
+      const r = svc.listSkills();
+      assert.equal(r.known, 1);
+      assert.equal(r.proposed, 1, 'vector_store si es una carencia: una tarea lo exige');
+      assert.equal(r.orphans, 1);
+      assert.ok(!r.skills.some((s) => s.source === 'orphan'), 'el ruido no se mezcla con el catalogo');
+      assert.match(r.note, /orphan/);
+
+      assert.equal(svc.listSkills({ include_orphans: true }).skills.length, 3, 'pero sigue siendo consultable');
+    } finally { db.cleanup(); }
+  });
+
+  test('acepta el caso degradado en que el modelo emite un string en vez de array', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['coding']);
+      assert.deepEqual(svc._deriveMissingSkills('pln_t', 'algo suelto').unattached, ['algo suelto']);
+    } finally { db.cleanup(); }
+  });
+});
+
 describe('trazabilidad ticket -> plan', () => {
   test('un ticket materializado queda ligado a la hoja de tarea que lo origino', () => {
     const db = makeDb();

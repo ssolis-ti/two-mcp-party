@@ -65,9 +65,17 @@ export function getSwarmTools(service) {
     },
     {
       name: 'bridge_swarm_skills',
-      description: 'Lista el catálogo de skills/capacidades de la mente colmena (conocidos y propuestos como faltantes).',
-      schema: { type: 'object', properties: {} },
-      handler: async () => service.listSkills(),
+      description:
+        'Catalogo de skills de la mente colmena. "known" son capacidades reales; "proposed" son las que ' +
+        'alguna tarea exige y NO existen aun (carencias reales). Los "orphan" —sugeridos a nivel de plan ' +
+        'pero que ninguna tarea exige— quedan fuera salvo que pidas include_orphans.',
+      schema: {
+        type: 'object',
+        properties: {
+          include_orphans: { type: 'boolean', description: 'Incluir los skills que ninguna tarea exige. Por defecto false.' },
+        },
+      },
+      handler: async (args) => service.listSkills(args || {}),
     },
     {
       name: 'bridge_swarm_contributions',
