@@ -64,6 +64,25 @@ CREATE TABLE IF NOT EXISTS swarm_contributions (
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- FEAT-011: el sintetizador consolida por contrato, y consolidar destruye el
+-- desacuerdo: cuando un angulo invalidaba lo que otro proponia, la objecion se
+-- promediaba hacia la nada. Esta tabla la retiene como artefacto de primera clase.
+-- Relacional (no un array JSON en el plan) para poder unir disputas con tickets.
+CREATE TABLE IF NOT EXISTS swarm_disputes (
+  id           TEXT PRIMARY KEY,
+  plan_id      TEXT NOT NULL REFERENCES swarm_plans(id) ON DELETE CASCADE,
+  claim        TEXT NOT NULL,                    -- la objecion, en palabras del objetor
+  raised_by    TEXT,                             -- angulo que objeto (NO es identidad verificable)
+  target       TEXT,                             -- titulo de tarea o propuesta objetada
+  target_task  TEXT REFERENCES swarm_tasks(id),  -- resuelto por titulo tras crear las tareas
+  severity     TEXT NOT NULL DEFAULT 'normal',   -- low | normal | high | critical
+  resolution   TEXT NOT NULL DEFAULT 'open',     -- open | accepted | dismissed
+  rationale    TEXT,                             -- obligatorio y verificado por codigo si dismissed
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_plan ON swarm_tasks(plan_id);
+CREATE INDEX IF NOT EXISTS idx_disputes_plan ON swarm_disputes(plan_id);
 CREATE INDEX IF NOT EXISTS idx_skills_name ON swarm_skills(name);
 CREATE INDEX IF NOT EXISTS idx_contrib_plan ON swarm_contributions(plan_id);

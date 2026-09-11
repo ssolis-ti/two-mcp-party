@@ -222,8 +222,20 @@ export class SwarmService {
         role: 'system',
         content: [
           'Eres el SINTETIZADOR de una mente colmena. NO ejecutas: produces el PLAN MAESTRO final.',
-          'Responde SOLO con JSON válido, sin markdown, con este esquema EXACTO:',
+          'Responde SOLO con JSON válido, sin markdown, con este esquema EXACTO.',
+          'IMPORTANTE: emite "disputes" ANTES que "tasks". Si tu respuesta se corta,',
+          'las objeciones deben haberse emitido ya.',
           JSON.stringify({
+            disputes: [
+              {
+                claim: 'la objecion, en las palabras del angulo que la planteo',
+                raised_by: 'angulo que objeto (descomposicion|dependencias|riesgos|capacidades|restricciones|validacion)',
+                target: 'titulo de la tarea o propuesta que se objeta',
+                severity: 'low | normal | high | critical',
+                resolution: 'open | accepted | dismissed',
+                rationale: 'si es dismissed: OBLIGATORIO, y debe CITAR TEXTUALMENTE una frase del claim',
+              },
+            ],
             summary: 'resumen del plan (1 frase)',
             tasks: [
               {
@@ -253,6 +265,12 @@ export class SwarmService {
           '',
           'Genera de 2 a 8 tareas. Las dependencias deben referirse por su "title".',
           'Sugiere un modelo de los disponibles SOLO si es claramente idóneo.',
+          '',
+          'DISPUTES: revisa los aportes y extrae TODA objecion en la que un angulo',
+          'contradiga, invalide o marque como inviable lo que otro propone. No las',
+          'promedies ni las resuelvas silenciosamente: cada una va en "disputes".',
+          'Si de verdad no hubo ninguna objecion, emite "disputes": [] de forma',
+          'EXPLICITA. Omitir el campo NO es lo mismo que no haber objeciones.',
         ].join('\n'),
       },
     ];
@@ -267,7 +285,177 @@ export class SwarmService {
     return this._parsePlanJson(text || '', synth.model);
   }
 
+  /**
+   * FEAT-011 — Envoltorio fail-closed sobre el parseo del plan.
+   *
+   * Regla central: ausencia de evidencia NO es evidencia de ausencia. Si el
+   * sintetizador no emitio `disputes`, no podemos concluir que no hubo objeciones:
+   * pudo truncarse o degradar a un fallback. En ese caso el plan se marca
+   * `degraded` para que la perdida sea ruidosa en vez de silenciosa.
+   *
+   * Solo un `disputes: []` EXPLICITO cuenta como "no hubo disenso". Como ninguna
+   * de las cuatro capas de fallback puede emitir el campo, todas quedan marcadas
+   * automaticamente al pasar por aqui.
+   */
   _parsePlanJson(raw, model) {
+    const plan = this._parsePlanJsonInner(raw, model) || { tasks: [] };
+    const hadField = Array.isArray(plan.disputes);
+
+    if (!hadField) {
+      logger.warn({ model }, 'FEAT-011: el plan llego sin `disputes`; se marca degraded (posible perdida de disenso)');
+    }
+
+    plan.disputes = this._validateDisputes(hadField ? plan.disputes : [], raw);
+    plan.degraded = !hadField;
+    return plan;
+  }
+
+  /**
+   * Valida las disputas SIN llamar a ningun modelo. Un `dismissed` solo se acepta
+   * si su `rationale` cita textualmente el claim que descarta; de lo contrario
+   * bastaba un "fuera de alcance" generico para enterrar una objecion y pasar
+   * igual todos los criterios. Si no cita, la disputa vuelve a `open`.
+   */
+  _validateDisputes(disputes, rawContext = '') {
+    if (!Array.isArray(disputes)) return [];
+    const VALID_RES = ['open', 'accepted', 'dismissed'];
+    const VALID_SEV = ['low', 'normal', 'high', 'critical'];
+
+    return disputes
+      .filter((d) => d && typeof d.claim === 'string' && d.claim.trim())
+      .map((d) => {
+        const claim = String(d.claim).trim();
+        let resolution = VALID_RES.includes(d.resolution) ? d.resolution : 'open';
+        const severity = VALID_SEV.includes(d.severity) ? d.severity : 'normal';
+        const rationale = typeof d.rationale === 'string' ? d.rationale.trim() : '';
+
+        if (resolution === 'dismissed' && !this._rationaleCitesClaim(rationale, claim)) {
+          logger.warn({ claim: claim.slice(0, 80) }, 'FEAT-011: dismissed sin cita literal del claim; degradado a open');
+          resolution = 'open';
+        }
+
+        return {
+          claim,
+          raised_by: typeof d.raised_by === 'string' ? d.raised_by.trim() : null,
+          target: typeof d.target === 'string' ? d.target.trim() : null,
+          severity,
+          resolution,
+          rationale: rationale || null,
+        };
+      });
+  }
+
+  /**
+   * El rationale debe contener una secuencia literal de >= MIN_RUN palabras del
+   * claim. Comparacion de texto normalizado, no regex sobre input del modelo.
+   */
+  _rationaleCitesClaim(rationale, claim, minRun = 8) {
+    if (!rationale || !claim) return false;
+    const norm = (s) => s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const hay = norm(rationale);
+    const words = norm(claim).split(' ').filter(Boolean);
+    if (words.length < minRun) return hay.includes(words.join(' ')) && words.length > 0;
+    for (let i = 0; i + minRun <= words.length; i++) {
+      if (hay.includes(words.slice(i, i + minRun).join(' '))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * FEAT-011 — Persiste el disenso del plan. `target` llega como titulo de tarea;
+   * se resuelve a un id real cuando coincide, para que materialize pueda marcar el
+   * ticket concreto sin reparsear el plan.
+   */
+  /** FEAT-011 — Todas las disputas de un plan, con el resumen del disenso abierto. */
+  listDisputes(planId) {
+    if (!planId) throw new Error('plan_id es requerido');
+    const plan = this.db.prepare('SELECT id FROM swarm_plans WHERE id = ?').get(planId);
+    if (!plan) throw new Error(`Plan no encontrado: ${planId}`);
+    const disputes = this.db
+      .prepare('SELECT * FROM swarm_disputes WHERE plan_id = ? ORDER BY created_at')
+      .all(planId);
+    return { plan_id: planId, summary: this._disputeSummary(planId), disputes };
+  }
+
+  /**
+   * FEAT-011 — Resolucion humana de una disputa. La validacion es la MISMA que
+   * se aplica a la salida del sintetizador: un dismissed sin cita literal del
+   * claim vuelve a open, para que nadie entierre una objecion con una frase hecha.
+   */
+  resolveDispute({ plan_id, dispute_id, resolution, rationale }) {
+    if (!plan_id || !dispute_id) throw new Error('plan_id y dispute_id son requeridos');
+    const row = this.db
+      .prepare('SELECT * FROM swarm_disputes WHERE id = ? AND plan_id = ?')
+      .get(dispute_id, plan_id);
+    if (!row) throw new Error(`Disputa no encontrada: ${dispute_id}`);
+
+    const [validated] = this._validateDisputes([
+      { claim: row.claim, raised_by: row.raised_by, target: row.target, severity: row.severity, resolution, rationale },
+    ]);
+    if (!validated) throw new Error('Disputa invalida');
+
+    const downgraded = resolution === 'dismissed' && validated.resolution === 'open';
+    this.db.prepare(
+      "UPDATE swarm_disputes SET resolution = ?, rationale = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(validated.resolution, validated.rationale, dispute_id);
+
+    return {
+      dispute_id,
+      resolution: validated.resolution,
+      downgraded,
+      message: downgraded
+        ? 'El rationale no cita textualmente el claim, asi que la disputa sigue ABIERTA. Cita una frase de la objecion para descartarla.'
+        : `Disputa marcada como ${validated.resolution}.`,
+      summary: this._disputeSummary(plan_id),
+    };
+  }
+
+  _persistDisputes(planId, disputes) {
+    if (!Array.isArray(disputes) || !disputes.length) return 0;
+    const ins = this.db.prepare(
+      `INSERT INTO swarm_disputes (id, plan_id, claim, raised_by, target, target_task, severity, resolution, rationale)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    let n = 0;
+    for (const d of disputes) {
+      const match = d.target
+        ? this.db.prepare('SELECT id FROM swarm_tasks WHERE plan_id = ? AND title = ?').get(planId, d.target)
+        : null;
+      ins.run(
+        generateId('dsp'), planId, d.claim, d.raised_by || null, d.target || null,
+        match ? match.id : null, d.severity || 'normal', d.resolution || 'open', d.rationale || null
+      );
+      n += 1;
+    }
+    return n;
+  }
+
+  /** Resumen del disenso de un plan, para respuestas de tools y CHECKPOINT. */
+  _disputeSummary(planId, topN = 5) {
+    const rows = this.db.prepare(
+      `SELECT id, claim, raised_by, target, severity, resolution, rationale
+       FROM swarm_disputes WHERE plan_id = ?
+       ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+                created_at`
+    ).all(planId);
+    const open = rows.filter((r) => r.resolution === 'open');
+    return {
+      total: rows.length,
+      open: open.length,
+      blocking: open.filter((r) => r.severity === 'critical').length,
+      // El humano necesita LEER la objecion, no contarla: se devuelve el texto.
+      top: open.slice(0, topN).map((r) => ({ id: r.id, claim: r.claim, raised_by: r.raised_by, target: r.target, severity: r.severity })),
+      more: Math.max(0, open.length - topN),
+    };
+  }
+
+  _parsePlanJsonInner(raw, model) {
     let cleaned = raw.trim();
     // Quitar fences de markdown si los hay
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -573,6 +761,8 @@ export class SwarmService {
     };
     this.db.prepare('UPDATE swarm_plans SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), planId);
 
+    this._persistDisputes(planId, plan.disputes);
+
     this.eventBus.emit('swarm:plan_created', { plan_id: planId, objective: objective.trim(), task_count: taskIds.length });
     logger.info({ plan_id: planId, tasks: taskIds.length }, 'Swarm plan created');
 
@@ -582,6 +772,11 @@ export class SwarmService {
     // degradado sin aviso.
     const got = (deliberation.contributions || []).length;
     const expected = deliberation.expected ?? got;
+    const disputes = { ...this._disputeSummary(planId), degraded: !!plan.degraded };
+    const warnings = [];
+    if (got < expected) warnings.push(`deliberacion degradada (${got}/${expected} angulos)`);
+    if (plan.degraded) warnings.push('el sintetizador no emitio `disputes`: puede haberse perdido disenso');
+    if (disputes.blocking) warnings.push(`${disputes.blocking} veto(s) critico(s) abierto(s): la materializacion esta bloqueada`);
     return {
       plan_id: planId,
       objective: objective.trim(),
@@ -593,11 +788,12 @@ export class SwarmService {
         lenses: (deliberation.contributions || []).map((c) => c.role).filter(Boolean),
         degraded: got < expected,
       },
+      disputes,
       tasks: taskIds,
       missing_skills: plan.missing_skills || [],
       risks: plan.risks || [],
-      message: got < expected
-        ? `ATENCION: deliberacion degradada (${got}/${expected} angulos). El plan se sintetizo con cobertura parcial.`
+      message: warnings.length
+        ? `ATENCION: ${warnings.join('. ')}.`
         : 'Plan maestro listo para que otras LLM lo ejecuten. Consulta bridge_swarm_tasks para ver las hojas de tarea.',
     };
   }
@@ -682,6 +878,8 @@ export class SwarmService {
         : (Array.isArray(plan.risks) ? plan.risks : []),
     };
     this.db.prepare('UPDATE swarm_plans SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), planId);
+
+    this._persistDisputes(planId, plan.disputes);
 
     this.eventBus.emit('swarm:plan_created', { plan_id: planId, objective: objective.trim(), task_count: taskIds.length });
     logger.info({ plan_id: planId, tasks: taskIds.length, source: 'debate' }, 'Swarm plan created from debate');

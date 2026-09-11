@@ -82,6 +82,30 @@ export function getSwarmTools(service) {
       handler: async (args) => service.listContributions(args.plan_id),
     },
     {
+      name: 'bridge_swarm_disputes',
+      description:
+        'Lista o resuelve el DISENSO de un plan maestro: objeciones donde un angulo de la colmena ' +
+        'invalido o contradijo lo que otro proponia, preservadas en vez de promediarse en la sintesis. ' +
+        'Sin dispute_id devuelve las disputas del plan. Con dispute_id + resolution las resuelve ' +
+        '(accion humana en el CHECKPOINT). Un "dismissed" exige que el rationale CITE TEXTUALMENTE ' +
+        'una frase del claim; si no la cita, la disputa vuelve a "open". Un veto abierto de severidad ' +
+        'critical bloquea bridge_materialize_plan.',
+      schema: {
+        type: 'object',
+        properties: {
+          plan_id: { type: 'string', description: 'ID del plan maestro' },
+          dispute_id: { type: 'string', description: 'ID de la disputa a resolver (omitir para solo listar)' },
+          resolution: { type: 'string', enum: ['open', 'accepted', 'dismissed'], description: 'Nueva resolucion' },
+          rationale: { type: 'string', description: 'Justificacion. Obligatoria si resolution es "dismissed", y debe citar el claim.' },
+        },
+        required: ['plan_id'],
+      },
+      handler: async (args) =>
+        args.dispute_id
+          ? service.resolveDispute(args)
+          : service.listDisputes(args.plan_id),
+    },
+    {
       name: 'bridge_swarm_mark_done',
       description: 'Registra que una tarea del plan fue ejecutada por una LLM externa (el hub solo actualiza el estado; no ejecuta la tarea).',
       schema: {

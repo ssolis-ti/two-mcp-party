@@ -7,6 +7,7 @@ import { SessionsService } from '../src/modules/sessions/sessions.service.js';
 import { WorkspacesService } from '../src/modules/workspaces/workspaces.service.js';
 import { LLMGatewayClient } from '../src/modules/hosted/llm-gateway-client.js';
 import { SwarmService } from '../src/modules/swarm/swarm.service.js';
+import { MaterializeService } from '../src/modules/materialize/materialize.service.js';
 
 function setup() {
   const db = makeDb();
@@ -364,6 +365,207 @@ describe('swarm._deliberate', () => {
     } finally {
       db.cleanup();
     }
+  });
+});
+
+describe('FEAT-011 disenso preservado', () => {
+  function swarmSvc() {
+    const db = makeDb();
+    const svc = new SwarmService(db, makeBus());
+    svc.config = { gateway: { baseUrl: 'http://x', maxTokens: 500, synthMaxTokens: 2000, temperature: 0.5 }, planning_agents: [], seed_skills: [] };
+    return { svc, db };
+  }
+
+  const CLAIM = 'Las pantallas de estado con datos de pacientes violan el RGPD por exposicion publica de informacion clinica';
+
+  describe('fail-closed: ausencia de evidencia no es evidencia de ausencia', () => {
+    test('un plan SIN el campo disputes se marca degraded', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        const plan = svc._parsePlanJson(JSON.stringify({ summary: 's', tasks: [{ title: 'T1' }] }), 'm');
+        assert.equal(plan.degraded, true, 'campo ausente no puede pasar como "no hubo objeciones"');
+        assert.deepEqual(plan.disputes, []);
+      } finally { db.cleanup(); }
+    });
+
+    test('un plan con disputes:[] EXPLICITO no se marca degraded', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        const plan = svc._parsePlanJson(JSON.stringify({ disputes: [], summary: 's', tasks: [{ title: 'T1' }] }), 'm');
+        assert.equal(plan.degraded, false, 'afirmar ausencia de disenso es distinto de omitirlo');
+      } finally { db.cleanup(); }
+    });
+
+    test('las capas de fallback tambien emiten el campo y marcan degraded', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        for (const raw of ['esto no es JSON en absoluto', '{"tasks": [', '']) {
+          const plan = svc._parsePlanJson(raw, 'm');
+          assert.ok(Array.isArray(plan.disputes), `fallback sin disputes[] para: ${raw.slice(0, 20)}`);
+          assert.equal(plan.degraded, true, `fallback sin marca degraded para: ${raw.slice(0, 20)}`);
+        }
+      } finally { db.cleanup(); }
+    });
+  });
+
+  describe('validador determinista (sin LLM)', () => {
+    test('un rationale de relleno NO alcanza para descartar: vuelve a open', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        const [d] = svc._validateDisputes([
+          { claim: CLAIM, resolution: 'dismissed', rationale: 'Fuera de alcance.', severity: 'critical' },
+        ]);
+        assert.equal(d.resolution, 'open', 'una frase hecha no puede enterrar una objecion');
+      } finally { db.cleanup(); }
+    });
+
+    test('un rationale que CITA el claim si permite descartarlo', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        const [d] = svc._validateDisputes([
+          {
+            claim: CLAIM,
+            resolution: 'dismissed',
+            severity: 'critical',
+            rationale: 'Se descarta: "con datos de pacientes violan el RGPD por exposicion publica" no aplica porque el panel sera anonimo.',
+          },
+        ]);
+        assert.equal(d.resolution, 'dismissed');
+      } finally { db.cleanup(); }
+    });
+
+    test('la cita funciona con acentos y puntuacion distintos', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        const [d] = svc._validateDisputes([
+          {
+            claim: 'Las pantallas con datos de pacientes violan el RGPD por exposición pública',
+            resolution: 'dismissed',
+            rationale: 'Sobre "pantallas con datos de pacientes violan el RGPD por exposicion publica": el panel es anonimo.',
+          },
+        ]);
+        assert.equal(d.resolution, 'dismissed', 'la normalizacion debe ignorar acentos y signos');
+      } finally { db.cleanup(); }
+    });
+
+    test('severity y resolution invalidas caen a valores seguros', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        const [d] = svc._validateDisputes([{ claim: CLAIM, resolution: 'inventada', severity: 'altisima' }]);
+        assert.equal(d.resolution, 'open');
+        assert.equal(d.severity, 'normal');
+      } finally { db.cleanup(); }
+    });
+
+    test('descarta entradas sin claim', () => {
+      const { svc, db } = swarmSvc();
+      try {
+        assert.equal(svc._validateDisputes([{ claim: '   ' }, { target: 'T1' }, null]).length, 0);
+      } finally { db.cleanup(); }
+    });
+  });
+
+  describe('persistencia y resolucion humana', () => {
+    function planWithDispute(severity = 'critical') {
+      const { svc, db } = swarmSvc();
+      db.prepare("INSERT INTO swarm_plans (id, objective) VALUES ('pln_t', 'obj')").run();
+      db.prepare("INSERT INTO swarm_tasks (id, plan_id, title) VALUES ('tsk_t', 'pln_t', 'Panel de estado')").run();
+      svc._persistDisputes('pln_t', svc._validateDisputes([
+        { claim: CLAIM, raised_by: 'restricciones', target: 'Panel de estado', severity, resolution: 'open' },
+      ]));
+      return { svc, db };
+    }
+
+    test('la disputa se liga al ticket concreto por titulo', () => {
+      const { svc, db } = planWithDispute();
+      try {
+        const row = db.prepare('SELECT * FROM swarm_disputes WHERE plan_id = ?').get('pln_t');
+        assert.equal(row.target_task, 'tsk_t', 'materialize necesita el id, no solo el titulo');
+        assert.equal(row.resolution, 'open');
+      } finally { db.cleanup(); }
+    });
+
+    test('el resumen devuelve el TEXTO del claim, no solo un conteo', () => {
+      const { svc, db } = planWithDispute();
+      try {
+        const s = svc._disputeSummary('pln_t');
+        assert.equal(s.open, 1);
+        assert.equal(s.blocking, 1);
+        assert.match(s.top[0].claim, /RGPD/, 'el humano debe poder leer la objecion en el CHECKPOINT');
+      } finally { db.cleanup(); }
+    });
+
+    test('resolver con relleno no cierra la disputa y lo informa', () => {
+      const { svc, db } = planWithDispute();
+      try {
+        const id = db.prepare('SELECT id FROM swarm_disputes WHERE plan_id = ?').get('pln_t').id;
+        const r = svc.resolveDispute({ plan_id: 'pln_t', dispute_id: id, resolution: 'dismissed', rationale: 'No aplica' });
+        assert.equal(r.resolution, 'open');
+        assert.equal(r.downgraded, true);
+        assert.equal(svc._disputeSummary('pln_t').blocking, 1, 'sigue bloqueando');
+      } finally { db.cleanup(); }
+    });
+
+    test('resolver citando el claim si la cierra y desbloquea', () => {
+      const { svc, db } = planWithDispute();
+      try {
+        const id = db.prepare('SELECT id FROM swarm_disputes WHERE plan_id = ?').get('pln_t').id;
+        const r = svc.resolveDispute({
+          plan_id: 'pln_t', dispute_id: id, resolution: 'dismissed',
+          rationale: 'Revisado: "con datos de pacientes violan el RGPD por exposicion publica" se resuelve anonimizando el panel.',
+        });
+        assert.equal(r.resolution, 'dismissed');
+        assert.equal(svc._disputeSummary('pln_t').blocking, 0);
+      } finally { db.cleanup(); }
+    });
+  });
+
+  describe('compuerta de materializacion', () => {
+    function matSvc() {
+      const db = makeDb();
+      const svc = new SwarmService(db, makeBus());
+      svc.config = { gateway: { baseUrl: 'http://x', maxTokens: 500, synthMaxTokens: 2000 }, planning_agents: [], seed_skills: [] };
+      const mat = new MaterializeService(db, makeBus());
+      db.prepare("INSERT INTO swarm_plans (id, objective) VALUES ('pln_t', 'obj')").run();
+      db.prepare("INSERT INTO swarm_tasks (id, plan_id, title) VALUES ('tsk_t', 'pln_t', 'Panel de estado')").run();
+      return { svc, mat, db };
+    }
+
+    test('un veto critico abierto bloquea, y materializePlan aborta sin efectos', async () => {
+      const { svc, mat, db } = matSvc();
+      try {
+        svc._persistDisputes('pln_t', svc._validateDisputes([{ claim: CLAIM, severity: 'critical', resolution: 'open' }]));
+        assert.equal(mat._blockingDisputes('pln_t').length, 1);
+        await assert.rejects(
+          () => mat.materializePlan({ plan_id: 'pln_t' }),
+          /BLOQUEADO/,
+          'no se puede ejecutar trabajo que ya fue invalidado'
+        );
+        assert.equal(db.prepare('SELECT COUNT(*) c FROM sessions').get().c, 0, 'no debe dejar sesion a medias');
+      } finally { db.cleanup(); }
+    });
+
+    test('una disputa no critica no bloquea', () => {
+      const { svc, mat, db } = matSvc();
+      try {
+        svc._persistDisputes('pln_t', svc._validateDisputes([{ claim: CLAIM, severity: 'high', resolution: 'open' }]));
+        assert.equal(mat._blockingDisputes('pln_t').length, 0);
+      } finally { db.cleanup(); }
+    });
+
+    test('el export redacta datos personales y conserva las descartadas', () => {
+      const { svc, mat, db } = matSvc();
+      try {
+        svc._persistDisputes('pln_t', [
+          { claim: 'Contactar a paciente@hospital.cl es ilegal', severity: 'high', resolution: 'open' },
+          { claim: 'Idea ya evaluada', severity: 'low', resolution: 'dismissed', rationale: 'Idea ya evaluada y descartada por costo' },
+        ]);
+        const md = mat._disputesMarkdown('pln_t');
+        assert.ok(!md.includes('paciente@hospital.cl'), 'el email no puede llegar al disco');
+        assert.match(md, /\[email redactado\]/);
+        assert.match(md, /dismissed/, 'el ejecutor debe ver lo ya descartado para no repetirlo');
+      } finally { db.cleanup(); }
+    });
   });
 });
 

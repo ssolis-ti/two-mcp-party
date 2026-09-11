@@ -58,10 +58,49 @@ export class MaterializeService {
     try { return JSON.parse(v); } catch (_) { return []; }
   }
 
+  /** FEAT-011 — Vetos criticos abiertos: bloquean la materializacion. */
+  _blockingDisputes(planId) {
+    try {
+      return this.db.prepare(
+        "SELECT id, claim, raised_by, target FROM swarm_disputes WHERE plan_id = ? AND resolution = 'open' AND severity = 'critical'"
+      ).all(planId);
+    } catch (_) {
+      return []; // tabla aun no migrada: no bloquear planes antiguos
+    }
+  }
+
+  /** FEAT-011 — Todo el disenso del plan, incluido el descartado. */
+  _allDisputes(planId) {
+    try {
+      return this.db.prepare(
+        'SELECT id, claim, raised_by, target, target_task, severity, resolution, rationale FROM swarm_disputes WHERE plan_id = ? ORDER BY created_at'
+      ).all(planId);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
+   * FEAT-011 — Redaccion best-effort de datos personales antes de escribir a disco.
+   * El caso que motiva esta funcionalidad es normativo (RGPD): un claim puede citar
+   * los mismos datos que objeta. No es una garantia, y se documenta como tal en el
+   * artefacto exportado.
+   */
+  _redactPII(text) {
+    if (!text) return text;
+    return String(text)
+      .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[email redactado]')
+      .replace(/\+?\d[\d\s().-]{7,}\d/g, '[telefono redactado]')
+      .replace(/\b\d{7,9}-[\dkK]\b/g, '[identificador redactado]');
+  }
+
   _allKnownSkills() {
     const rows = this.db.prepare("SELECT name FROM swarm_skills WHERE source = 'known' ORDER BY name").all();
     return rows.map((r) => r.name);
   }
+
+  /** FEAT-011 — Seccion de disenso para el artefacto exportado, con PII redactada. */
+  _disputesMarkdown(planId) {
 
   /**
    * T3/T4 — Exporta el plan maestro a ARTEFACTOS en el workspace de la sesión.
@@ -70,8 +109,32 @@ export class MaterializeService {
    *   <workspace>/<plan_id>/tasks/<tsk_<id>>.md       -> una hoja de tarea por tarea
    * El workspace es un directorio real en disco (no solo isla SQLite), lo que
    * permite auditoría, revisión y consumo por herramientas externas de archivos.
-   * @returns {object} { workspace, planFile, taskFiles }
+   * @returns {object} { workspace, planFile, taskFiles, disputesFile }
    */
+    const disputes = this._allDisputes(planId);
+    if (!disputes.length) return '';
+    const fmt = (d) => {
+      const head = `- **[${d.severity}] ${d.resolution}** — ${this._redactPII(d.claim)}`;
+      const meta = [d.raised_by ? `angulo: ${d.raised_by}` : null, d.target ? `sobre: ${d.target}` : null]
+        .filter(Boolean).join(' · ');
+      const why = d.rationale ? `\n  - Descartada porque: ${this._redactPII(d.rationale)}` : '';
+      return `${head}${meta ? `\n  - ${meta}` : ''}${why}`;
+    };
+    return [
+      '',
+      '## Disenso registrado',
+      '',
+      'Objeciones que un angulo de la colmena planteo contra lo que otro proponia.',
+      'Las descartadas se incluyen a proposito: no vuelvas a proponer lo que ya se evaluo.',
+      '',
+      '> Los textos pasaron por redaccion automatica de datos personales. Es best-effort,',
+      '> no una garantia: revisa antes de compartir este archivo.',
+      '',
+      ...disputes.map(fmt),
+      '',
+    ].join('\n');
+  }
+
   _exportToWorkspace(plan, tasks) {
     const base = path.resolve(__dirname, '..', '..', '..', 'workspace');
     const planDir = path.join(base, plan.id);
@@ -100,6 +163,14 @@ export class MaterializeService {
     };
     const planFile = path.join(planDir, 'plan.json');
     writeFileSync(planFile, JSON.stringify(planDoc, null, 2), 'utf8');
+
+    // FEAT-011: el disenso viaja con el plan, no solo en la base.
+    const disputesMd = this._disputesMarkdown(plan.id);
+    let disputesFile = null;
+    if (disputesMd) {
+      disputesFile = path.join(planDir, 'disputes.md');
+      writeFileSync(disputesFile, `# Disenso — ${plan.objective}\n${disputesMd}`, 'utf8');
+    }
 
     const taskFiles = [];
     for (const t of tasks) {
@@ -143,7 +214,7 @@ export class MaterializeService {
       taskFiles.push(tf);
     }
 
-    return { workspace: planDir, planFile, taskFiles };
+    return { workspace: planDir, planFile, taskFiles, disputesFile };
   }
 
   /**
@@ -157,6 +228,18 @@ export class MaterializeService {
 
     // 1) datos del plan
     const { plan, tasks } = this._planData(planId);
+
+    // FEAT-011: compuerta. Un veto critico sin resolver invalida el plan; no se
+    // publica un solo ticket hasta que un humano lo resuelva. Antes esto se
+    // promediaba en la sintesis y el trabajo ya invalidado igual se ejecutaba.
+    const blocking = this._blockingDisputes(planId);
+    if (blocking.length) {
+      const detail = blocking.map((d) => `  - [${d.id}] ${d.claim}`).join('\n');
+      throw new Error(
+        `Plan ${planId} BLOQUEADO: ${blocking.length} veto(s) critico(s) sin resolver.\n${detail}\n` +
+        'Resuelvelos con bridge_swarm_disputes antes de materializar.'
+      );
+    }
     logger.info({ planId, tasks: tasks.length, orchestrator }, 'Materializing swarm plan');
 
     // 2) skills faltantes: capabilities de las tareas que no están en el catálogo 'known'
@@ -193,10 +276,18 @@ export class MaterializeService {
     await this._call('bridge_join_session', { agent_name: orchestrator, session_id: sessionId });
 
     // 6) compartir contexto rico (memoria)
+    // FEAT-011: el ejecutor hereda TAMBIEN las disputas descartadas. Si solo viera
+    // las abiertas, podria volver a proponer exactamente lo que ya se evaluo y
+    // descarto, repitiendo el error que alguien ya detecto.
+    const allDisputes = this._allDisputes(planId);
     const memoryValue = JSON.stringify({
       plan_id: planId,
       objective: plan.objective,
       missing_skills: missingSkills,
+      disputes_open: allDisputes.filter((d) => d.resolution === 'open')
+        .map((d) => ({ claim: d.claim, raised_by: d.raised_by, target: d.target, severity: d.severity })),
+      disputes_dismissed: allDisputes.filter((d) => d.resolution === 'dismissed')
+        .map((d) => ({ claim: d.claim, rationale: d.rationale })),
       decision_orchestrator: 'Hermes valida cada propuesta de la colmena contra el harness real antes de aceptarla.',
       nota_traspaso: missingSkills.length
         ? `Capabilities que el plan exige y NO existen en el catálogo: ${missingSkills.join(', ')}. Quien ejecute debe crearlas o descartarlas tras validación.`
@@ -241,7 +332,7 @@ Cedo el turno al siguiente agente.`;
       missing_skills: missingSkills,
       memory_key: 'colmena:contexto_rico',
       workspace: exportArtifacts.workspace,
-      artifacts: { plan_file: exportArtifacts.planFile, task_files: exportArtifacts.taskFiles },
+      artifacts: { plan_file: exportArtifacts.planFile, task_files: exportArtifacts.taskFiles, disputes_file: exportArtifacts.disputesFile || null },
     };
   }
 }
