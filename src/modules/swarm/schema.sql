@@ -82,7 +82,23 @@ CREATE TABLE IF NOT EXISTS swarm_disputes (
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Que skill exige cada tarea. `swarm_tasks.capabilities` guarda lo que el modelo
+-- escribio (texto libre) y se conserva como registro crudo; esta tabla es la
+-- relacion RESUELTA contra el catalogo. Sin ella, "que tareas necesitan este
+-- skill" era un LIKE sobre un blob JSON, y habia capabilities referenciadas que
+-- no existian en swarm_skills: el cruce por nombre no fallaba, simplemente no
+-- encontraba nada y nadie se enteraba.
+CREATE TABLE IF NOT EXISTS swarm_task_skills (
+  task_id   TEXT NOT NULL REFERENCES swarm_tasks(id) ON DELETE CASCADE,
+  skill_id  TEXT NOT NULL REFERENCES swarm_skills(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_id, skill_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_plan ON swarm_tasks(plan_id);
 CREATE INDEX IF NOT EXISTS idx_disputes_plan ON swarm_disputes(plan_id);
+CREATE INDEX IF NOT EXISTS idx_task_skills_skill ON swarm_task_skills(skill_id);
+-- El catalogo se consulta por nombre; sin esto nada impedia dos filas homonimas
+-- con ids distintos, y una tarea podia resolver contra cualquiera de las dos.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name_unique ON swarm_skills(name);
 CREATE INDEX IF NOT EXISTS idx_skills_name ON swarm_skills(name);
 CREATE INDEX IF NOT EXISTS idx_contrib_plan ON swarm_contributions(plan_id);

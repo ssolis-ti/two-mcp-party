@@ -82,6 +82,19 @@ export function getSwarmTools(service) {
       handler: async (args) => service.listContributions(args.plan_id),
     },
     {
+      name: 'bridge_swarm_plan_skills',
+      description:
+        'Skills que exige un plan maestro, RESUELTOS contra el catalogo: por cada capacidad devuelve ' +
+        'que tareas la necesitan y si es conocida o esta solo propuesta (no existe aun). ' +
+        'Antes las capacidades vivian como texto dentro de cada tarea y no se cruzaban con nada.',
+      schema: {
+        type: 'object',
+        properties: { plan_id: { type: 'string', description: 'ID del plan maestro' } },
+        required: ['plan_id'],
+      },
+      handler: async (args) => service.planSkills(args.plan_id),
+    },
+    {
       name: 'bridge_swarm_disputes',
       description:
         'Lista o resuelve el DISENSO de un plan maestro: objeciones donde un angulo de la colmena ' +

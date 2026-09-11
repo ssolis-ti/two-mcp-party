@@ -570,6 +570,84 @@ describe('FEAT-011 disenso preservado', () => {
   });
 });
 
+describe('trazabilidad tarea -> skill', () => {
+  function swarmWithPlan() {
+    const db = makeDb();
+    const svc = new SwarmService(db, makeBus());
+    svc.config = { gateway: { baseUrl: 'http://x', maxTokens: 500, synthMaxTokens: 2000 }, planning_agents: [], seed_skills: [] };
+    db.prepare("INSERT INTO swarm_plans (id, objective) VALUES ('pln_t','obj')").run();
+    db.prepare("INSERT INTO swarm_tasks (id, plan_id, title) VALUES ('tsk_a','pln_t','Disenar API')").run();
+    db.prepare("INSERT INTO swarm_tasks (id, plan_id, title) VALUES ('tsk_b','pln_t','Escribir tests')").run();
+    db.prepare("INSERT INTO swarm_skills (id, name, domain, source) VALUES ('skl_cod','coding','software','known')").run();
+    return { svc, db };
+  }
+
+  test('una capability conocida se liga al skill existente, sin duplicarlo', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      const proposed = svc._linkTaskSkills('tsk_a', ['coding']);
+      assert.deepEqual(proposed, [], 'no debe proponer un skill que ya existe');
+      const row = db.prepare('SELECT skill_id FROM swarm_task_skills WHERE task_id = ?').get('tsk_a');
+      assert.equal(row.skill_id, 'skl_cod');
+      assert.equal(db.prepare('SELECT COUNT(*) c FROM swarm_skills').get().c, 1, 'no debe duplicar el catalogo');
+    } finally { db.cleanup(); }
+  });
+
+  test('una capability desconocida se CATALOGA como propuesta en vez de perderse', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      const proposed = svc._linkTaskSkills('tsk_a', ['prompt-protocol design']);
+      assert.deepEqual(proposed, ['prompt-protocol design']);
+      const s = db.prepare("SELECT * FROM swarm_skills WHERE name = 'prompt-protocol design'").get();
+      assert.equal(s.source, 'proposed', 'debe quedar marcado como inexistente en el catalogo');
+      assert.ok(db.prepare('SELECT 1 FROM swarm_task_skills WHERE task_id = ? AND skill_id = ?').get('tsk_a', s.id));
+    } finally { db.cleanup(); }
+  });
+
+  test('dos tareas comparten el mismo skill (relacion muchos-a-muchos)', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['coding']);
+      svc._linkTaskSkills('tsk_b', ['coding', 'testing']);
+
+      const r = svc.planSkills('pln_t');
+      const coding = r.skills.find((s) => s.skill === 'coding');
+      assert.equal(coding.required_by.length, 2, 'un skill puede ser exigido por varias tareas');
+      assert.equal(r.total, 2);
+      assert.equal(r.missing, 1, 'testing no estaba en el catalogo');
+      assert.match(r.message, /testing/);
+    } finally { db.cleanup(); }
+  });
+
+  test('el enlace es idempotente: repetir la capability no duplica la fila', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['coding', 'coding', ' coding ']);
+      assert.equal(db.prepare('SELECT COUNT(*) c FROM swarm_task_skills WHERE task_id = ?').get('tsk_a').c, 1);
+    } finally { db.cleanup(); }
+  });
+
+  test('el catalogo no admite dos skills con el mismo nombre', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      assert.throws(
+        () => db.prepare("INSERT INTO swarm_skills (id, name, source) VALUES ('skl_dup','coding','known')").run(),
+        /UNIQUE/i,
+        'resolver por nombre exige que el nombre sea unico'
+      );
+    } finally { db.cleanup(); }
+  });
+
+  test('borrar una tarea no deja enlaces huerfanos', () => {
+    const { svc, db } = swarmWithPlan();
+    try {
+      svc._linkTaskSkills('tsk_a', ['coding']);
+      db.prepare("DELETE FROM swarm_tasks WHERE id = 'tsk_a'").run();
+      assert.equal(db.prepare('SELECT COUNT(*) c FROM swarm_task_skills').get().c, 0, 'el CASCADE debe limpiar');
+    } finally { db.cleanup(); }
+  });
+});
+
 describe('trazabilidad ticket -> plan', () => {
   test('un ticket materializado queda ligado a la hoja de tarea que lo origino', () => {
     const db = makeDb();

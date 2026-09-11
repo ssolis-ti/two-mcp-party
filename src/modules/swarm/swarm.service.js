@@ -372,6 +372,41 @@ export class SwarmService {
    * se resuelve a un id real cuando coincide, para que materialize pueda marcar el
    * ticket concreto sin reparsear el plan.
    */
+  /**
+   * Skills exigidos por un plan, resueltos contra el catalogo. Responde las dos
+   * preguntas que antes exigian recorrer blobs JSON: que skills necesita este
+   * plan, y que tareas dependen de cada uno.
+   */
+  planSkills(planId) {
+    if (!planId) throw new Error('plan_id es requerido');
+    const rows = this.db.prepare(`
+      SELECT s.id, s.name, s.domain, s.source, t.id AS task_id, t.title AS task_title
+      FROM swarm_task_skills ts
+      JOIN swarm_skills s ON s.id = ts.skill_id
+      JOIN swarm_tasks  t ON t.id = ts.task_id
+      WHERE t.plan_id = ?
+      ORDER BY s.source, s.name`).all(planId);
+
+    const bySkill = new Map();
+    for (const r of rows) {
+      if (!bySkill.has(r.id)) {
+        bySkill.set(r.id, { skill: r.name, domain: r.domain, source: r.source, required_by: [] });
+      }
+      bySkill.get(r.id).required_by.push({ task_id: r.task_id, title: r.task_title });
+    }
+    const skills = [...bySkill.values()];
+    const missing = skills.filter((s) => s.source === 'proposed');
+    return {
+      plan_id: planId,
+      total: skills.length,
+      missing: missing.length,
+      skills,
+      message: missing.length
+        ? `${missing.length} skill(s) exigidos por el plan NO estan en el catalogo conocido: ${missing.map((m) => m.skill).join(', ')}.`
+        : 'Todas las capacidades exigidas por el plan existen en el catalogo.',
+    };
+  }
+
   /** FEAT-011 — Todas las disputas de un plan, con el resumen del disenso abierto. */
   listDisputes(planId) {
     if (!planId) throw new Error('plan_id es requerido');
@@ -414,6 +449,42 @@ export class SwarmService {
         : `Disputa marcada como ${validated.resolution}.`,
       summary: this._disputeSummary(plan_id),
     };
+  }
+
+  /**
+   * Resuelve las capabilities de una tarea contra el catalogo de skills y deja
+   * la relacion escrita en swarm_task_skills.
+   *
+   * Una capability que no existe se CATALOGA como 'proposed' en vez de ignorarse:
+   * antes el texto quedaba dentro del blob JSON de la tarea y nadie se enteraba de
+   * que exigia un skill inexistente. Se devuelven los nombres recien propuestos
+   * para poder reportarlos.
+   */
+  _linkTaskSkills(taskId, capabilities) {
+    const proposed = [];
+    if (!Array.isArray(capabilities)) return proposed;
+
+    const findSkill = this.db.prepare('SELECT id FROM swarm_skills WHERE name = ?');
+    const insSkill = this.db.prepare(
+      "INSERT INTO swarm_skills (id, name, domain, description, source) VALUES (?, ?, 'general', ?, 'proposed')"
+    );
+    const link = this.db.prepare(
+      'INSERT OR IGNORE INTO swarm_task_skills (task_id, skill_id) VALUES (?, ?)'
+    );
+
+    for (const raw of capabilities) {
+      const name = String(raw || '').trim();
+      if (!name) continue;
+      let skill = findSkill.get(name);
+      if (!skill) {
+        const id = generateId('skl');
+        insSkill.run(id, name, 'Exigido por una tarea del plan y ausente del catalogo');
+        skill = { id };
+        proposed.push(name);
+      }
+      link.run(taskId, skill.id);
+    }
+    return proposed;
   }
 
   _persistDisputes(planId, disputes) {
@@ -737,6 +808,7 @@ export class SwarmService {
         JSON.stringify(Array.isArray(t.capabilities) ? t.capabilities : []),
         (t.suggested_model || '').trim() || null
       );
+      this._linkTaskSkills(taskId, Array.isArray(t.capabilities) ? t.capabilities : []);
       taskIds.push({ id: taskId, title: t.title || 'Tarea' });
     }
 
@@ -856,6 +928,7 @@ export class SwarmService {
         JSON.stringify(Array.isArray(t.capabilities) ? t.capabilities : []),
         (t.suggested_model || '').trim() || null
       );
+      this._linkTaskSkills(taskId, Array.isArray(t.capabilities) ? t.capabilities : []);
       taskIds.push({ id: taskId, title: t.title || 'Tarea' });
     }
 
