@@ -21,6 +21,46 @@ import { LLMGatewayClient } from '../hosted/llm-gateway-client.js';
  * el siguiente plan maestro (nuevo objetivo/estrategia) para mejorar el sistema
  * o el propio módulo. No ejecuta: solo propone el plan.
  */
+/**
+ * Angulos de deliberacion. Cada miembro de la colmena recibe uno distinto
+ * (round-robin por posicion), porque con el prompt identico los modelos
+ * convergian en las mismas cuatro respuestas: mas modelos daban mas eco, no
+ * mas cobertura. Al repartir el problema, cada modelo agregado explora una
+ * faceta que ninguno de los anteriores estaba mirando.
+ */
+const PLANNING_LENSES = [
+  {
+    name: 'descomposicion',
+    brief: 'partir el objetivo en unidades de trabajo ejecutables.',
+    ask: 'que subtareas concretas faltan, con que granularidad y en que entregable termina cada una.',
+  },
+  {
+    name: 'dependencias',
+    brief: 'el orden en que las cosas pueden ocurrir.',
+    ask: 'que depende de que, cual es la ruta critica y que prerequisitos externos bloquean el arranque.',
+  },
+  {
+    name: 'riesgos',
+    brief: 'lo que puede salir mal y los supuestos fragiles.',
+    ask: 'que supuestos no estan verificados, que modos de fallo existen y como se detectaria cada uno a tiempo.',
+  },
+  {
+    name: 'capacidades',
+    brief: 'quien puede hacer el trabajo.',
+    ask: 'que skills exige el objetivo, cuales NO estan en la lista disponible y cual es el plan si no se consiguen.',
+  },
+  {
+    name: 'restricciones',
+    brief: 'los limites reales de recursos, tiempo y contexto.',
+    ask: 'que restricciones de costo, plazo, normativa o infraestructura acotan las opciones, y que queda descartado por eso.',
+  },
+  {
+    name: 'validacion',
+    brief: 'como se sabra si el objetivo se cumplio.',
+    ask: 'que evidencia demostraria exito, que metricas hay que medir antes de empezar y como se evita el autoengaño.',
+  },
+];
+
 export class SwarmService {
   constructor(db, eventBus) {
     this.db = db;
@@ -91,64 +131,82 @@ export class SwarmService {
 
   // ─────────────────────── deliberación colaborativa ───────────────────────
   /**
-   * Recolecta una ronda colaborativa de pensamiento de los modelos para
-   * enriquecer la descomposición del plan. Devuelve texto consolidado.
-   * Número controlado de llamadas: min(2, planning_agents.length).
+   * Recolecta una ronda de deliberación para enriquecer la descomposición del
+   * plan. Cada miembro recibe un ANGULO distinto (PLANNING_LENSES), de modo que
+   * sumar modelos amplía la cobertura en vez de duplicarla. Cuesta una llamada
+   * por deliberador; el último agente no delibera: sintetiza.
    */
   async _deliberate(objective, description, knownSkills, agents) {
-    const planners = (this.config.planning_agents || []).slice(0, 3);
-    const prompts = [];
-    const system = [
-      'Eres parte de una MENTE COLMENA planificadora. No vas a ejecutar nada:',
-      'solo DISEÑAS y ORGANIZAS. Aporta solidez a la descomposición de un objetivo.',
-    ].join('\n');
+    // Deliberan TODOS los planning_agents menos el ultimo, que sintetiza.
+    // Antes habia un slice(0, 3) fijo: sumar modelos no ampliaba nada y los que
+    // caian entre la posicion 3 y la ultima quedaban ignorados en silencio.
+    const all = this.config.planning_agents || [];
+    const planners = all.length > 1 ? all.slice(0, -1) : all;
 
-    for (const pa of planners) {
-      prompts.push({
+    const prompts = planners.map((pa, i) => {
+      const lens = PLANNING_LENSES[i % PLANNING_LENSES.length];
+      return {
         model: pa.model,
         name: pa.name,
         role: pa.role,
+        lens: lens.name,
         messages: [
-          { role: 'system', content: system },
+          {
+            role: 'system',
+            content: [
+              'Eres parte de una MENTE COLMENA planificadora. No vas a ejecutar nada:',
+              'solo DISEÑAS y ORGANIZAS. Otros miembros cubren otros angulos del mismo',
+              'objetivo, asi que NO intentes ser exhaustivo: aporta profundidad en el tuyo.',
+              '',
+              `TU ANGULO ASIGNADO — ${lens.name.toUpperCase()}: ${lens.brief}`,
+            ].join('\n'),
+          },
           {
             role: 'user',
             content: [
               `OBJETIVO PRINCIPAL: "${objective}".`,
               description ? `CONTEXTO: ${description}\n` : '',
               `SKILLS/AGENTES DISPONIBLES: ${JSON.stringify({ skills: knownSkills, agents })}\n`,
-              'Tu aporte: identifica (1) subtareas que faltan, (2) dependencias críticas,',
-              '(3) skills que se requerirán y no están disponibles, (4) riesgos. SÉ CONCRETO, máx 150 palabras.',
+              `Aporta EXCLUSIVAMENTE desde tu angulo (${lens.name}): ${lens.ask}`,
+              'SÉ CONCRETO y especifico del dominio. Máx 200 palabras. Sin preambulos.',
             ].join('\n'),
           },
         ],
         max_tokens: this.config.gateway.maxTokens,
         temperature: this.config.gateway.temperature,
-      });
-    }
+      };
+    });
 
     const results = [];
     // T2: retiene cada aporte individual (model, role, content) para persistirlo.
     const contributions = [];
     for (const pr of prompts) {
       try {
-        const { text } = await this.client.chat({
+        const { text, reasoning } = await this.client.chat({
           model: pr.model,
           messages: pr.messages,
           max_tokens: pr.max_tokens,
           temperature: pr.temperature,
         });
+        // `reasoning` NUNCA se usa como aporte: es el borrador interno del modelo.
         if (text && text.trim()) {
           const content = text.trim();
-          results.push(`[${pr.name} (${pr.role})] ${content}`);
-          contributions.push({ model: pr.model, role: pr.role || null, content });
+          results.push(`[${pr.name} — angulo: ${pr.lens}] ${content}`);
+          contributions.push({ model: pr.model, role: pr.lens, content });
+          logger.info({ model: pr.model, lens: pr.lens }, 'Swarm deliberation contribution collected');
+        } else {
+          logger.warn(
+            { model: pr.model, lens: pr.lens, reasoningChars: (reasoning || '').length },
+            'Swarm deliberation: model produced no answer (only reasoning?); angulo sin cubrir'
+          );
         }
-        logger.info({ model: pr.model }, 'Swarm deliberation contribution collected');
       } catch (err) {
-        logger.warn({ model: pr.model, err: err.message }, 'Swarm deliberation skip');
+        logger.warn({ model: pr.model, lens: pr.lens, err: err.message }, 'Swarm deliberation skip');
       }
     }
-    // Retorna objeto con el texto concatenado (para la síntesis) + aportes crudos (para DB).
-    return { text: results.join('\n\n'), contributions };
+    // Retorna el texto consolidado (para la sintesis) + aportes crudos (para DB)
+    // + cuantos angulos se esperaban, para poder reportar deliberacion degradada.
+    return { text: results.join('\n\n'), contributions, expected: prompts.length };
   }
 
   /**
@@ -518,16 +576,29 @@ export class SwarmService {
     this.eventBus.emit('swarm:plan_created', { plan_id: planId, objective: objective.trim(), task_count: taskIds.length });
     logger.info({ plan_id: planId, tasks: taskIds.length }, 'Swarm plan created');
 
+    // `contributors` contaba parrafos del texto concatenado (reportaba 13 con 3
+    // modelos). Ahora se informa la cobertura real de la deliberacion, y si algun
+    // angulo quedo sin cubrir el llamador se entera en vez de recibir un plan
+    // degradado sin aviso.
+    const got = (deliberation.contributions || []).length;
+    const expected = deliberation.expected ?? got;
     return {
       plan_id: planId,
       objective: objective.trim(),
       status: 'ready',
       summary: plan.summary,
-      contributors: contributors ? contributors.split('\n\n').length : 0,
+      deliberation: {
+        contributors: got,
+        expected,
+        lenses: (deliberation.contributions || []).map((c) => c.role).filter(Boolean),
+        degraded: got < expected,
+      },
       tasks: taskIds,
       missing_skills: plan.missing_skills || [],
       risks: plan.risks || [],
-      message: 'Plan maestro listo para que otras LLM lo ejecuten. Consulta bridge_swarm_tasks para ver las hojas de tarea.',
+      message: got < expected
+        ? `ATENCION: deliberacion degradada (${got}/${expected} angulos). El plan se sintetizo con cobertura parcial.`
+        : 'Plan maestro listo para que otras LLM lo ejecuten. Consulta bridge_swarm_tasks para ver las hojas de tarea.',
     };
   }
 

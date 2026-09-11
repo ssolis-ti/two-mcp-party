@@ -47,7 +47,11 @@ export const hostedConfig = {
     baseUrl: GATEWAY_URL,
     apiKey: resolveGatewayKey(),
     timeoutMs: 240000,  // 240s (coherente con el request_timeout tipico de un gateway)
-    maxTokens: 1024,
+    // Los prompts piden ~250 palabras (~400 tokens), pero los modelos "thinking"
+    // gastan presupuesto razonando ANTES de responder. Con 1024 se medio: 44% de
+    // los turnos salian cortados a mitad de frase y 22% no alcanzaban a responder.
+    // Con 4096, glm-5.3 todavia consumia el techo entero razonando (16k chars).
+    maxTokens: 8192,
     temperature: 0.7,
   },
 
@@ -73,6 +77,22 @@ export const hostedConfig = {
       model: 'grok-4.6',
       description: 'Backed by grok-4.6 (Inference). Tough, constructive critic.',
     },
+    {
+      name: 'peer3',
+      role: 'analyst',
+      model: 'deepseek-v4-pro',
+      description: 'Backed by deepseek-v4-pro (DeepSeek). Deep reasoning on constraints.',
+    },
+    {
+      name: 'peer4',
+      role: 'analyst',
+      model: 'gemini-3.7-flash',
+      description: 'Backed by gemini-3.7-flash (Inference). Fast, broad coverage.',
+    },
+    // El ULTIMO agente de esta lista es siempre el sintetizador de la colmena
+    // (swarm) y el moderador que cierra en las conversaciones (hosted). Los
+    // anteriores deliberan, cada uno con un angulo distinto: agregar modelos
+    // aqui amplia la cobertura del analisis.
     {
       name: 'chair',
       role: 'synthesizer',

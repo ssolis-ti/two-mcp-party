@@ -247,7 +247,7 @@ export class HostedService {
       logger.info({ session_id: conversation.sessionId, agent: agentName, role, model: participant.model }, 'Hosted agent thinking');
 
       // Call LiteLLM.
-      const { text, model, usage } = await this.client.chat({
+      const { text, reasoning, usage, finish_reason } = await this.client.chat({
         model: participant.model,
         messages: turn.messages,
         max_tokens: this.config.gateway.maxTokens,
@@ -256,7 +256,19 @@ export class HostedService {
 
       const content = (text || '').trim();
       if (!content) {
-        throw new Error(`Model ${participant.model} returned empty content`);
+        // Modelo "thinking" que gasto todo el presupuesto razonando y no llego a
+        // responder. Antes se publicaba el razonamiento crudo como si fuera el
+        // turno; ahora falla con un diagnostico accionable.
+        const why = reasoning
+          ? `solo emitio razonamiento (${reasoning.length} chars) sin respuesta; sube gateway.maxTokens (actual: ${this.config.gateway.maxTokens})`
+          : 'devolvio contenido vacio';
+        throw new Error(`Model ${participant.model} ${why}`);
+      }
+      if (finish_reason === 'length') {
+        logger.warn(
+          { session_id: conversation.sessionId, agent: agentName, model: participant.model, maxTokens: this.config.gateway.maxTokens },
+          'Hosted turn hit the token cap and was cut mid-answer'
+        );
       }
 
       // Inject the agent's message. Determine yields-to.
@@ -274,9 +286,34 @@ export class HostedService {
       logger.info({ session_id: conversation.sessionId, agent: agentName, tokens: usage?.total_tokens }, 'Hosted agent spoke');
       return sent;
     } catch (err) {
-      logger.error({ err, session_id: conversation.sessionId }, 'Hosted step failed');
+      // Un turno fallido NO puede matar la conversacion: un panel de 5 modelos no
+      // debe morir porque uno se quedo razonando sin responder. Se salta a ese
+      // agente, se deja constancia en el canal y se sigue con el proximo.
+      const step = conversation.plan[conversation.planIndex];
+      const agentName = step ? step[0] : 'desconocido';
+      logger.error({ err, session_id: conversation.sessionId, agent: agentName }, 'Hosted step failed; skipping turn');
+
+      conversation.planIndex += 1;
+      conversation.skipped = (conversation.skipped || 0) + 1;
       conversation.busy = false;
-      throw err;
+
+      this._broadcastSystem(
+        conversation.sessionId,
+        `## ⚠️ Turno omitido — ${agentName}: ${err.message}`
+      );
+
+      // Si fallan todos, no queda nada que decir: se cierra en vez de girar en vacio.
+      if (conversation.skipped >= conversation.plan.length) {
+        conversation.state = 'failed';
+        this._broadcastSystem(conversation.sessionId, '## ❌ Conversation aborted: every turn failed.');
+        return;
+      }
+      if (conversation.planIndex < conversation.plan.length) {
+        setImmediate(() => this._step(conversation).catch(() => { /* ya registrado */ }));
+      } else {
+        conversation.state = 'complete';
+        this._broadcastSystem(conversation.sessionId, '## ✅ Conversation complete (with skipped turns).');
+      }
     }
   }
 

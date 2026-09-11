@@ -6,6 +6,7 @@ import { MessagingService } from '../src/modules/messaging/messaging.service.js'
 import { SessionsService } from '../src/modules/sessions/sessions.service.js';
 import { WorkspacesService } from '../src/modules/workspaces/workspaces.service.js';
 import { LLMGatewayClient } from '../src/modules/hosted/llm-gateway-client.js';
+import { SwarmService } from '../src/modules/swarm/swarm.service.js';
 
 function setup() {
   const db = makeDb();
@@ -264,6 +265,127 @@ describe('LLMGatewayClient', () => {
         return true;
       }
     );
+  });
+});
+
+describe('swarm._deliberate', () => {
+  // Cliente falso: no toca la red, registra que prompt recibio cada modelo.
+  function fakeClient(seen) {
+    return {
+      async chat({ model, messages }) {
+        seen.push({ model, system: messages[0].content, user: messages[1].content });
+        return { text: `aporte de ${model}`, reasoning: '' };
+      },
+    };
+  }
+
+  function svcWith(agents, seen) {
+    const db = makeDb();
+    const svc = new SwarmService(db, makeBus());
+    svc.config = {
+      gateway: { baseUrl: 'http://x', maxTokens: 500, temperature: 0.5, synthMaxTokens: 2000 },
+      planning_agents: agents,
+      seed_skills: [],
+    };
+    svc.client = fakeClient(seen);
+    return { svc, db };
+  }
+
+  const mkAgents = (n) =>
+    Array.from({ length: n }, (_, i) => ({ name: `a${i}`, role: 'analyst', model: `modelo-${i}` }));
+
+  test('deliberan todos los agentes menos el sintetizador', async () => {
+    const seen = [];
+    const { svc, db } = svcWith(mkAgents(6), seen);
+    try {
+      const r = await svc._deliberate('objetivo', '', [], []);
+      assert.equal(seen.length, 5, 'con 6 agentes deben deliberar 5 (el ultimo sintetiza)');
+      assert.equal(r.expected, 5);
+      assert.deepEqual(
+        seen.map((s) => s.model),
+        ['modelo-0', 'modelo-1', 'modelo-2', 'modelo-3', 'modelo-4'],
+        'ningun agente intermedio debe quedar ignorado'
+      );
+    } finally {
+      db.cleanup();
+    }
+  });
+
+  test('agregar un modelo agrega un angulo, no un eco', async () => {
+    const seen3 = [];
+    const a = svcWith(mkAgents(4), seen3);
+    const seen4 = [];
+    const b = svcWith(mkAgents(5), seen4);
+    try {
+      await a.svc._deliberate('objetivo', '', [], []);
+      await b.svc._deliberate('objetivo', '', [], []);
+
+      const lentes = (seen) => seen.map((s) => s.system.match(/TU ANGULO ASIGNADO — (\w+)/)[1]);
+      const l3 = lentes(seen3);
+      const l4 = lentes(seen4);
+
+      assert.equal(new Set(l3).size, 3, 'cada deliberador recibe un angulo distinto');
+      assert.equal(new Set(l4).size, 4, 'el modelo agregado trae un angulo nuevo');
+      assert.ok(l4.length > l3.length, 'sumar un modelo debe sumar cobertura');
+    } finally {
+      a.db.cleanup();
+      b.db.cleanup();
+    }
+  });
+
+  test('el angulo llega al prompt del modelo, no es decorativo', async () => {
+    const seen = [];
+    const { svc, db } = svcWith(mkAgents(4), seen);
+    try {
+      await svc._deliberate('objetivo', '', [], []);
+      for (const s of seen) {
+        assert.match(s.system, /TU ANGULO ASIGNADO/, 'el system prompt debe declarar el angulo');
+      }
+      const systems = new Set(seen.map((s) => s.system));
+      assert.equal(systems.size, seen.length, 'ningun par de deliberadores puede recibir el mismo prompt');
+    } finally {
+      db.cleanup();
+    }
+  });
+
+  test('un modelo que solo razona no contamina la deliberacion', async () => {
+    const { svc, db } = svcWith(mkAgents(3), []);
+    svc.client = {
+      async chat({ model }) {
+        if (model === 'modelo-1') return { text: '', reasoning: 'The user wants me to...' };
+        return { text: `aporte de ${model}`, reasoning: '' };
+      },
+    };
+    try {
+      const r = await svc._deliberate('objetivo', '', [], []);
+      assert.equal(r.contributions.length, 1, 'el turno sin respuesta no debe contar como aporte');
+      assert.equal(r.expected, 2, 'pero si debe reportarse como angulo esperado');
+      assert.ok(!/The user wants/.test(r.text), 'el razonamiento crudo nunca entra al texto consolidado');
+    } finally {
+      db.cleanup();
+    }
+  });
+});
+
+describe('LLMGatewayClient.chat parsing', () => {
+  test('no usa reasoning_content como respuesta', async () => {
+    const client = new LLMGatewayClient({ baseUrl: 'http://x' });
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'thinking-model',
+        choices: [{ message: { content: '', reasoning_content: 'Okay, let me think about this...' }, finish_reason: 'length' }],
+        usage: {},
+      }),
+    });
+    try {
+      const r = await client.chat({ model: 'thinking-model', messages: [{ role: 'user', content: 'x' }] });
+      assert.equal(r.text, '', 'el borrador interno no es la respuesta');
+      assert.match(r.reasoning, /let me think/, 'pero queda disponible para diagnostico');
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });
 

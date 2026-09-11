@@ -93,12 +93,13 @@ export class LLMGatewayClient {
       const text = data?.choices?.[0]?.message?.content ?? '';
       const reasoning = data?.choices?.[0]?.message?.reasoning_content ?? '';
       return {
-        // Algunos modelos "thinking" (p.ej. deepseek-r1, ciertos GLM/kimi)
-        // entregan el razonamiento en `reasoning_content` y dejan `content`
-        // vacío. Si ocurre, lo usamos como texto para no abortar el turno.
-        text: typeof text === 'string' && text.trim()
-          ? text
-          : (typeof reasoning === 'string' ? reasoning.trim() : ''),
+        // `text` es SOLO la respuesta real del modelo. Los modelos "thinking"
+        // entregan su borrador en `reasoning_content`; usarlo como respuesta
+        // publicaba el scratchpad en el canal ("The user wants me to...") y
+        // desperdiciaba el turno. Se devuelve aparte para diagnostico, y quien
+        // llama decide: nunca es la respuesta.
+        text: typeof text === 'string' ? text : '',
+        reasoning: typeof reasoning === 'string' ? reasoning : '',
         model: data.model || model,
         usage: data.usage || {},
         finish_reason: data.choices?.[0]?.finish_reason,
