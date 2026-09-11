@@ -7,7 +7,11 @@ export function getTasksTools(service, db) {
         type: 'object',
         properties: {
           agent_name: { type: 'string', description: 'Name of the agent publishing the task' },
-          description: { type: 'string', description: 'Description of the task to be done' }
+          description: { type: 'string', description: 'Description of the task to be done' },
+          swarm_task_id: {
+            type: 'string',
+            description: 'Optional. ID of the swarm plan task (swarm_tasks.id) this ticket executes, so the work stays traceable back to the plan that designed it.'
+          }
         },
         required: ['agent_name', 'description']
       },
@@ -16,7 +20,7 @@ export function getTasksTools(service, db) {
         if (!agent || !agent.current_session_id) {
           throw new Error('You must join a session to publish a task.');
         }
-        return service.publishTask(args.agent_name, agent.current_session_id, args.description);
+        return service.publishTask(args.agent_name, agent.current_session_id, args.description, args.swarm_task_id);
       }
     },
     {

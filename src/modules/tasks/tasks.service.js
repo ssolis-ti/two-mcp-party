@@ -7,7 +7,7 @@ export class TasksService {
     this.eventBus = eventBus;
   }
 
-  publishTask(agentName, sessionId, description) {
+  publishTask(agentName, sessionId, description, swarmTaskId = null) {
     if (!agentName || !sessionId || !description) {
       throw new Error('agentName, sessionId, and description are required');
     }
@@ -15,10 +15,10 @@ export class TasksService {
     try {
       const taskId = generateId('tsk');
       this.db.prepare(
-        'INSERT INTO tasks (id, session_id, publisher, description) VALUES (?, ?, ?, ?)'
-      ).run(taskId, sessionId, agentName, description);
+        'INSERT INTO tasks (id, session_id, publisher, description, swarm_task_id) VALUES (?, ?, ?, ?, ?)'
+      ).run(taskId, sessionId, agentName, description, swarmTaskId || null);
 
-      const task = { id: taskId, session_id: sessionId, publisher: agentName, description, status: 'open' };
+      const task = { id: taskId, session_id: sessionId, publisher: agentName, description, status: 'open', swarm_task_id: swarmTaskId || null };
       logger.info({ taskId, publisher: agentName }, 'Task published');
       
       const sysMsgId = generateId('msg');

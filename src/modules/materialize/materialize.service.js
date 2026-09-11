@@ -299,7 +299,13 @@ export class MaterializeService {
     const pubResults = [];
     for (const t of tasks) {
       const desc = `${t.title}\n${t.description || ''}\n\nDeliverable: ${t.deliverable || ''}\nSkills: ${this._parseJsonArr(t.capabilities).join(', ')}\nDepende de: ${this._parseJsonArr(t.dependencies).join(', ') || 'nada'}`;
-      const pub = await this._call('bridge_publish_task', { agent_name: orchestrator, description: desc });
+      // El ticket queda ligado a la hoja de tarea que lo origino: sin esto el plan
+      // se copiaba como texto y no habia forma de saber que tarea ejecuta cada ticket.
+      const pub = await this._call('bridge_publish_task', {
+        agent_name: orchestrator,
+        description: desc,
+        swarm_task_id: t.id,
+      });
       pubResults.push(pub.id || pub);
     }
 

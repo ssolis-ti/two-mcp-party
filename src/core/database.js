@@ -33,6 +33,20 @@ export class DB {
         }
       }
       
+      // Auto-migrate tasks table: liga el ticket ejecutable con la hoja de tarea
+      // que la colmena diseño. SQLite permite ADD COLUMN con REFERENCES siempre
+      // que el default sea NULL, que es justo el caso (un ticket publicado a mano
+      // no viene de ningun plan).
+      const tasksTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").get();
+      if (tasksTable) {
+        const taskCols = this.db.prepare('PRAGMA table_info(tasks)').all().map((c) => c.name);
+        if (!taskCols.includes('swarm_task_id')) {
+          this.db.exec('ALTER TABLE tasks ADD COLUMN swarm_task_id TEXT REFERENCES swarm_tasks(id)');
+          this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_swarm_task ON tasks(swarm_task_id)');
+          logger.info("Auto-migrated table 'tasks': added column 'swarm_task_id'");
+        }
+      }
+
       // Seed SYSTEM agent to satisfy Foreign Key constraints for SYSTEM messages
       const agentsTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agents'").get();
       if (agentsTable) {

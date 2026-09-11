@@ -8,6 +8,7 @@ import { WorkspacesService } from '../src/modules/workspaces/workspaces.service.
 import { LLMGatewayClient } from '../src/modules/hosted/llm-gateway-client.js';
 import { SwarmService } from '../src/modules/swarm/swarm.service.js';
 import { MaterializeService } from '../src/modules/materialize/materialize.service.js';
+import { TasksService } from '../src/modules/tasks/tasks.service.js';
 
 function setup() {
   const db = makeDb();
@@ -566,6 +567,64 @@ describe('FEAT-011 disenso preservado', () => {
         assert.match(md, /dismissed/, 'el ejecutor debe ver lo ya descartado para no repetirlo');
       } finally { db.cleanup(); }
     });
+  });
+});
+
+describe('trazabilidad ticket -> plan', () => {
+  test('un ticket materializado queda ligado a la hoja de tarea que lo origino', () => {
+    const db = makeDb();
+    try {
+      addAgent(db, 'orq');
+      db.prepare("INSERT INTO swarm_plans (id, objective) VALUES ('pln_t','obj')").run();
+      db.prepare("INSERT INTO swarm_tasks (id, plan_id, title) VALUES ('tsk_plan','pln_t','Disenar API')").run();
+      const sessions = new SessionsService(db, makeBus());
+      const ses = sessions.createSession({ name: 's', mode: 'moderator' });
+      sessions.joinSession('orq', ses.id);
+
+      const svc = new TasksService(db, makeBus());
+      const t = svc.publishTask('orq', ses.id, 'Implementar la API disenada', 'tsk_plan');
+
+      const row = db.prepare('SELECT swarm_task_id FROM tasks WHERE id = ?').get(t.id);
+      assert.equal(row.swarm_task_id, 'tsk_plan', 'el ticket debe saber que tarea del plan ejecuta');
+
+      // La consulta que antes era imposible: del ticket al objetivo del plan.
+      const trace = db.prepare(`
+        SELECT p.objective, st.title FROM tasks t
+        JOIN swarm_tasks st ON st.id = t.swarm_task_id
+        JOIN swarm_plans p ON p.id = st.plan_id
+        WHERE t.id = ?`).get(t.id);
+      assert.equal(trace.title, 'Disenar API');
+      assert.equal(trace.objective, 'obj');
+    } finally { db.cleanup(); }
+  });
+
+  test('un ticket publicado a mano sigue siendo valido sin plan', () => {
+    const db = makeDb();
+    try {
+      addAgent(db, 'humano');
+      const sessions = new SessionsService(db, makeBus());
+      const ses = sessions.createSession({ name: 's', mode: 'moderator' });
+      sessions.joinSession('humano', ses.id);
+
+      const t = new TasksService(db, makeBus()).publishTask('humano', ses.id, 'Tarea suelta');
+      assert.equal(db.prepare('SELECT swarm_task_id FROM tasks WHERE id = ?').get(t.id).swarm_task_id, null);
+    } finally { db.cleanup(); }
+  });
+
+  test('la FK rechaza un swarm_task_id inexistente', () => {
+    const db = makeDb();
+    try {
+      addAgent(db, 'orq');
+      const sessions = new SessionsService(db, makeBus());
+      const ses = sessions.createSession({ name: 's', mode: 'moderator' });
+      sessions.joinSession('orq', ses.id);
+
+      assert.throws(
+        () => new TasksService(db, makeBus()).publishTask('orq', ses.id, 'x', 'tsk_inexistente'),
+        /FOREIGN KEY/i,
+        'la integridad referencial debe impedir ligar a un plan que no existe'
+      );
+    } finally { db.cleanup(); }
   });
 });
 
