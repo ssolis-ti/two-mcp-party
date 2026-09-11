@@ -63,6 +63,23 @@ export class HostedService {
     return this.config.agents;
   }
 
+  /**
+   * Acepta un roster ad-hoc: strings con el nombre del modelo, u objetos
+   * {model, name?, role?}. Los nombres se autogeneran y se hacen unicos, porque
+   * el mismo modelo puede ocupar varios asientos con roles distintos.
+   */
+  _normalizeRoster(participants) {
+    const used = new Set();
+    return participants.map((p, i) => {
+      const spec = typeof p === 'string' ? { model: p } : p || {};
+      if (!spec.model) throw new Error(`participants[${i}]: falta 'model'`);
+      let name = spec.name || `${String(spec.model).replace(/[^a-z0-9]+/gi, '-')}-${i + 1}`;
+      while (used.has(name)) name = `${name}x`;
+      used.add(name);
+      return { name, role: spec.role || 'analyst', model: spec.model, description: `Ad-hoc seat backed by ${spec.model}.` };
+    });
+  }
+
   /** Register a model-agent in the hub so it can be a session participant. */
   _registerAgent(name, role, model) {
     try {
@@ -103,7 +120,11 @@ export class HostedService {
     const maxTurns = p.max_turns || 12;
     if (!topic || !topic.trim()) throw new Error('topic is required for a conversation');
 
-    const agents = this.getParticipants();
+    // Roster por conversacion: permite correr un panel con un subconjunto de
+    // modelos (p.ej. solo una familia) sin tocar la config global del hub.
+    const agents = p.participants?.length
+      ? this._normalizeRoster(p.participants)
+      : this.getParticipants();
     if (!agents || agents.length === 0) {
       throw new Error('No hosted model-agents configured. Check hosted.config.js.');
     }
@@ -140,6 +161,7 @@ export class HostedService {
       maxTurns,
       plan: cappedPlan,
       participants: names,
+      roster: agents,
       planIndex: 0,
       busy: false,
       state: 'starting',
@@ -228,8 +250,10 @@ export class HostedService {
       const role = step[1].role;
       const closes = step[1].closes;
 
-      // Look up the model for this agent.
-      const participant = this.getParticipants().find((a) => a.name === agentName);
+      // Look up the model for this agent: primero en el roster de ESTA
+      // conversacion, si se lanzo con uno ad-hoc.
+      const roster = conversation.roster?.length ? conversation.roster : this.getParticipants();
+      const participant = roster.find((a) => a.name === agentName);
       if (!participant) {
         throw new Error(`No model configured for agent ${agentName}`);
       }
@@ -296,6 +320,18 @@ export class HostedService {
       conversation.planIndex += 1;
       conversation.skipped = (conversation.skipped || 0) + 1;
       conversation.busy = false;
+
+      // El agente que fallo se quedaba con el token de turno, asi que el
+      // siguiente rebotaba con "It is not your turn" y el fallo se propagaba en
+      // cadena. Se traspasa el token al proximo orador antes de continuar.
+      try {
+        const next = conversation.plan[conversation.planIndex]?.[0] || null;
+        this.db.prepare(
+          "UPDATE sessions SET current_turn = ?, updated_at = datetime('now') WHERE id = ?"
+        ).run(next, conversation.sessionId);
+      } catch (e) {
+        logger.warn({ err: e, session_id: conversation.sessionId }, 'No se pudo traspasar el token tras el turno omitido');
+      }
 
       this._broadcastSystem(
         conversation.sessionId,

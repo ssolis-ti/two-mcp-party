@@ -27,6 +27,15 @@ export function getHostedTools(service) {
             type: 'string',
             description: 'Optional readable session name.',
           },
+          participants: {
+            type: 'array',
+            description:
+              'Optional ad-hoc roster for THIS conversation, overriding the hub default. ' +
+              'Items are model names (e.g. "nvidia-nemotron") or objects {model, name?, role?}. ' +
+              'The same model may take several seats with different roles. ' +
+              'Use bridge_list_models or the gateway /v1/models to see what is available.',
+            items: { type: ['string', 'object'] },
+          },
         },
         required: ['topic'],
       },
